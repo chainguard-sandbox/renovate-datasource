@@ -1,0 +1,6 @@
+apiVersion: v2
+name: renovate-datasource
+description: Renovate custom datasource for Chainguard images
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

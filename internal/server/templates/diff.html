@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{.Title}}: {{.OldRef}} → {{.NewRef}}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>{{.CSS}}</style>
+</head>
+<body>
+  <h1>
+    {{if .ConsoleURL}}<a class="repo" href="{{.ConsoleURL}}" target="_blank" rel="noopener">{{.Title}}<span class="ext-arrow" aria-hidden="true">↗</span></a>{{else}}<span class="repo">{{.Title}}</span>{{end}}:
+    <span class="ref from">{{.OldRef}}</span>
+    <span class="arrow">→</span>
+    <span class="ref to">{{.NewRef}}</span>
+  </h1>
+
+  <div id="loading"><span class="spinner"></span>Computing diff…</div>
+  <div id="error" class="error" hidden></div>
+
+  <div id="content" hidden>
+    <div id="ref-meta" class="apk-meta"></div>
+
+    <details class="diff-section" open>
+      <summary>Image Configuration</summary>
+      <div id="config"></div>
+    </details>
+
+    <details class="diff-section" open>
+      <summary>Packages</summary>
+      <div id="packages"></div>
+    </details>
+
+    <details class="diff-section" open>
+      <summary>Sources</summary>
+      <div id="sources"></div>
+    </details>
+
+    <details class="diff-section" open>
+      <summary>Apko Configuration</summary>
+      <div id="apko"></div>
+    </details>
+  </div>
+
+  <script>
+    const repo = {{.Repo}};
+    const oldRef = {{.OldRef}};
+    const newRef = {{.NewRef}};
+  </script>
+  <script>{{.CommonJS}}</script>
+  <script>{{.JS}}</script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+# -- Chainguard org (--org). Required.
+org: ""
+
+# -- UIDP of the assumable Chainguard identity (--identity). Required.
+identity: ""
+
+image:
+  # -- Container image reference. Required.
+  repository: ""
+  # -- Image tag. Ignored when `digest` is set.
+  tag: latest
+  # -- Optional immutable digest (`sha256:...`). Overrides `tag` in the
+  # rendered image reference.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Default cooldown window (--cooldown), Go duration string. Leave empty
+# to disable cooldown; per-request `?cooldown=` still overrides it.
+cooldown: ""
+
+# -- Max concurrent ListTagHistory calls per request (--history-concurrency).
+historyConcurrency: 16
+
+# -- Listen port for the HTTP service (--port).
+port: 8080
+
+# -- Number of pod replicas.
+replicas: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Projected Chainguard identity token. The service mounts a short-lived
+# service-account token at `{mountPath}/token` and passes that path via
+# --identity-token, so the container never sees a long-lived credential.
+identityToken:
+  audience: issuer.enforce.dev
+  mountPath: /var/run/secrets/chainguard
+  expirationSeconds: 3600
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  # -- When true, render an Ingress pointing at this service.
+  enabled: false
+  # -- IngressClass name (matches `kubectl get ingressclass`).
+  className: ""
+  # -- Host header the ingress routes on. Required when `enabled`.
+  hostname: ""
+  # -- Extra annotations for the Ingress resource (e.g. cert-manager).
+  annotations: {}
+  # -- Optional TLS configuration, forwarded verbatim to `spec.tls`.
+  tls: []
+
+serviceAccount:
+  # -- Overrides the generated ServiceAccount name.
+  name: ""
+
+# -- Extra labels applied to every rendered resource.
+extraLabels: {}
+
+# -- Extra labels applied to the pod template only.
+podLabels: {}
+
+# -- nodeSelector / tolerations / affinity pass through unchanged.
+nodeSelector: {}
+tolerations: []
+affinity: {}

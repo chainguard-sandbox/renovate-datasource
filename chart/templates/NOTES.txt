@@ -1,0 +1,11 @@
+renovate-datasource is deployed as release "{{ .Release.Name }}" in
+namespace "{{ .Release.Namespace }}".
+
+Point Renovate at the in-cluster service:
+
+  http://{{ include "renovate-datasource.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Health probes:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "renovate-datasource.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl http://localhost:{{ .Values.service.port }}/readyz

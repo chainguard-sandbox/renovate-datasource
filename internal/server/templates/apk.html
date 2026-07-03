@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{.Name}}: {{.From}} → {{.To}}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>{{.CSS}}</style>
+</head>
+<body>
+  <h1>
+    <span class="repo">{{.Name}}</span>:
+    <a class="ref from" href="{{.FromURL}}">{{.From}}</a>
+    <span class="arrow">→</span>
+    <a class="ref to" href="{{.ToURL}}">{{.To}}</a>
+  </h1>
+
+  <div id="loading"><span class="spinner"></span>Loading apk diff…</div>
+  <div id="error" class="error" hidden></div>
+
+  <div id="content" hidden>
+    <div id="apk-meta" class="apk-meta"></div>
+    <details class="diff-section" open>
+      <summary>Sources</summary>
+      <div id="sources"></div>
+    </details>
+
+    <details class="diff-section" open>
+      <summary>.melange.yaml</summary>
+      <div id="melange"></div>
+    </details>
+
+    <details class="diff-section" open>
+      <summary>.PKGINFO</summary>
+      <div id="pkginfo"></div>
+    </details>
+  </div>
+
+  <script>
+    const apkName = {{.Name}};
+    const fromVer = {{.From}};
+    const toVer = {{.To}};
+  </script>
+  <script>{{.CommonJS}}</script>
+  <script>{{.JS}}</script>
+</body>
+</html>

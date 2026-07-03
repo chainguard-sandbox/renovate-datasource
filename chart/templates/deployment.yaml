@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "renovate-datasource.fullname" . }}
+  labels:
+    {{- include "renovate-datasource.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "renovate-datasource.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "renovate-datasource.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "renovate-datasource.serviceAccountName" . }}
+      containers:
+        - name: app
+          image: {{ include "renovate-datasource.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --org={{ required "org is required" .Values.org }}
+            - --identity={{ required "identity is required" .Values.identity }}
+            - --identity-token={{ .Values.identityToken.mountPath }}/token
+            - --port={{ .Values.port }}
+            {{- with .Values.cooldown }}
+            - --cooldown={{ . }}
+            {{- end }}
+            {{- with .Values.historyConcurrency }}
+            - --history-concurrency={{ . }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: chainguard-token
+              mountPath: {{ .Values.identityToken.mountPath }}
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        # Projected service-account token for Chainguard identity auth. The
+        # kubelet rotates it before expiry, so the pod always has a fresh
+        # OIDC token to trade in for a Chainguard chainctl token.
+        - name: chainguard-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.identityToken.audience }}
+                  expirationSeconds: {{ .Values.identityToken.expirationSeconds }}
+                  path: token
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
