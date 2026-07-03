@@ -35,4 +35,9 @@ func writeHTMLHeaders(w http.ResponseWriter) {
 			"base-uri 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	// Belt-and-braces HSTS. Browsers ignore it on plain-HTTP responses
+	// anyway, so this is harmless when the operator runs the service
+	// behind a non-TLS ingress in dev; in production it hardens against
+	// a downgrade on the (rare) direct-to-pod fetch path.
+	w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 }
