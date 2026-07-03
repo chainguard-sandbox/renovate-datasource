@@ -135,9 +135,6 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 		baseTS, tokenFile, identity = base, file, o.identity
 		xchg := sts.New(issuer, audience, sts.WithIdentity(o.identity))
 		ts = oauth2.ReuseTokenSource(nil, sts.NewContextTokenSource(ctx, base, xchg))
-
-	default:
-		return nil, fmt.Errorf("unsupported auth mode: %d", o.mode)
 	}
 
 	// Shared dial-and-resolve: one gRPC connection, dynamic per-RPC
@@ -195,11 +192,7 @@ func (c *Client) Close() error {
 // tokens it returns nil — there's no async credential we can probe without
 // making a request.
 func (c *Client) Ready(_ context.Context) error {
-	switch c.mode {
-	case authChainctl:
-		_, err := loadChainctlToken()
-		return err
-	case authIdentity:
+	if c.mode == authIdentity {
 		if c.tokenFile == "" {
 			return nil
 		}
@@ -207,9 +200,9 @@ func (c *Client) Ready(_ context.Context) error {
 			return fmt.Errorf("identity token file unreadable: %w", err)
 		}
 		return nil
-	default:
-		return fmt.Errorf("unknown auth mode")
 	}
+	_, err := loadChainctlToken()
+	return err
 }
 
 func resolveOrgUIDP(ctx context.Context, iamc iam.Clients, orgName string) (string, error) {
