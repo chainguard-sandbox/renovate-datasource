@@ -21,6 +21,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"time"
 
@@ -169,8 +170,13 @@ func (f *Fetcher) fetchFromSource(ctx context.Context, src repoSource, name, ver
 			return nil, fmt.Errorf("rate limiter wait for %s: %w", src.baseURL, err)
 		}
 	}
-	url := fmt.Sprintf("%s/%s/%s-%s.apk", src.baseURL, f.arch, name, version)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// name and version are already validated against apkNamePattern /
+	// apkVersionPattern at the HTTP boundary, so PathEscape here is
+	// belt-and-braces — it keeps the URL well-formed even if either
+	// pattern is ever relaxed. Matches the same convention used by the
+	// apk version-page URL builder in the server package.
+	fetchURL := fmt.Sprintf("%s/%s/%s-%s.apk", src.baseURL, f.arch, url.PathEscape(name), url.PathEscape(version))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building apk request: %w", err)
 	}
@@ -184,7 +190,7 @@ func (f *Fetcher) fetchFromSource(ctx context.Context, src repoSource, name, ver
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetching %s: %w", url, err)
+		return nil, fmt.Errorf("fetching %s: %w", fetchURL, err)
 	}
 	// Close without draining: extractContents returns as soon as the
 	// control entries are captured, and for large apks (nodejs, glibc,
@@ -199,12 +205,12 @@ func (f *Fetcher) fetchFromSource(ctx context.Context, src repoSource, name, ver
 		if err != nil {
 			return nil, err
 		}
-		c.URL = url
+		c.URL = fetchURL
 		return c, nil
 	case http.StatusNotFound:
-		return nil, fmt.Errorf("%w (%s)", ErrNotFound, url)
+		return nil, fmt.Errorf("%w (%s)", ErrNotFound, fetchURL)
 	default:
-		return nil, fmt.Errorf("apk fetch %s: status %d", url, resp.StatusCode)
+		return nil, fmt.Errorf("apk fetch %s: status %d", fetchURL, resp.StatusCode)
 	}
 }
 
