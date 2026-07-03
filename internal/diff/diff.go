@@ -137,12 +137,13 @@ const mainPackageLabel = "dev.chainguard.package.main"
 // Compute drives the OCI calls and builds the response.
 //
 // The from-side and to-side fetches run concurrently via errgroup. Within
-// each side we ResolveDigest first so Config and SBOMSPDX share the resolved
-// per-platform digest and don't each re-do the platform negotiation; the two
-// subsequent calls run sequentially for simplicity. We fetch the full SBOM
-// (packages + relationships) on each side because the per-source changelog
-// URLs are derived from SPDX GENERATED_FROM links between each apk and its
-// upstream github/gitlab source.
+// each side we ResolveDigest first so both downstream calls share the
+// resolved per-platform digest and don't each re-do the platform
+// negotiation; the Config and attestation fetches then run in parallel,
+// since they're independent registry round-trips. We fetch the full SBOM
+// (packages + relationships) on each side because the per-source
+// changelog URLs are derived from SPDX GENERATED_FROM links between each
+// apk and its upstream github/gitlab source.
 func Compute(ctx context.Context, f Fetcher, repo, fromRef, toRef string) (*Response, error) {
 	var (
 		fromCfg, toCfg       *v1.ConfigFile
@@ -156,20 +157,32 @@ func Compute(ctx context.Context, f Fetcher, repo, fromRef, toRef string) (*Resp
 		if err != nil {
 			return fmt.Errorf("%s resolve: %w", label, err)
 		}
-		cfg, err := f.Config(ctx, repo, digest)
-		if err != nil {
-			return fmt.Errorf("%s config: %w", label, err)
-		}
-		// A single attestation fetch feeds both the SBOM and the apko
-		// diff. A nil apkoBytes here means the image has no apko
-		// attestation — legitimate for older or non-apko-built images —
-		// and is surfaced downstream via FromApkoMissing / ToApkoMissing.
-		doc, apkoBytes, err := f.SBOMAndApkoConfig(ctx, repo, digest)
-		if err != nil {
-			return fmt.Errorf("%s sbom: %w", label, err)
-		}
-		*cfgOut, *digestOut, *sbomOut, *apkoOut = cfg, digest, sbomFromSPDX(doc), apkoBytes
-		return nil
+		*digestOut = digest
+
+		inner, innerCtx := errgroup.WithContext(ctx)
+		inner.Go(func() error {
+			cfg, err := f.Config(innerCtx, repo, digest)
+			if err != nil {
+				return fmt.Errorf("%s config: %w", label, err)
+			}
+			*cfgOut = cfg
+			return nil
+		})
+		inner.Go(func() error {
+			// A single attestation fetch feeds both the SBOM and the
+			// apko diff. A nil apkoBytes here means the image has no
+			// apko attestation — legitimate for older or non-apko-built
+			// images — and is surfaced downstream via
+			// FromApkoMissing / ToApkoMissing.
+			doc, apkoBytes, err := f.SBOMAndApkoConfig(innerCtx, repo, digest)
+			if err != nil {
+				return fmt.Errorf("%s sbom: %w", label, err)
+			}
+			*sbomOut = sbomFromSPDX(doc)
+			*apkoOut = apkoBytes
+			return nil
+		})
+		return inner.Wait()
 	}
 
 	eg, egCtx := errgroup.WithContext(ctx)
