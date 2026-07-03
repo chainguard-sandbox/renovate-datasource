@@ -24,17 +24,26 @@ func collectSources(s *sbom) map[string]sourceAggregate {
 	for _, p := range s.Packages {
 		pkgByID[p.ID] = p
 	}
+	// Pre-index GENERATED_FROM edges by their From ID so the per-package
+	// loop below does an O(1) map lookup rather than an O(R) scan of all
+	// relationships. On Chainguard SBOMs the two are typically in the
+	// hundreds and low thousands respectively, so the previous nested
+	// scan was O(P*R) per side per diff.
+	edgesByFrom := make(map[string][]string, len(s.Packages))
+	for _, r := range s.Relationships {
+		if r.Type != "GENERATED_FROM" {
+			continue
+		}
+		edgesByFrom[r.From] = append(edgesByFrom[r.From], r.To)
+	}
 
 	out := map[string]sourceAggregate{}
 	for _, p := range s.Packages {
 		if ecosystemFromPurl(p.Purl) != "apk" {
 			continue
 		}
-		for _, r := range s.Relationships {
-			if r.Type != "GENERATED_FROM" || r.From != p.ID {
-				continue
-			}
-			src, ok := pkgByID[r.To]
+		for _, toID := range edgesByFrom[p.ID] {
+			src, ok := pkgByID[toID]
 			if !ok || !isSourcePurl(src.Purl) {
 				continue
 			}
