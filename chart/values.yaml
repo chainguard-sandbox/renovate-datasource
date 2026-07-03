@@ -7,10 +7,12 @@ identity: ""
 image:
   # -- Container image reference. Required.
   repository: ""
-  # -- Image tag. Ignored when `digest` is set.
-  tag: latest
+  # -- Image tag. Required when `digest` is unset. No default — set an
+  # explicit tag (or, preferably, `digest`) so deployments are
+  # reproducible and Helm can detect version changes.
+  tag: ""
   # -- Optional immutable digest (`sha256:...`). Overrides `tag` in the
-  # rendered image reference.
+  # rendered image reference. Preferred over `tag` for production.
   digest: ""
   pullPolicy: IfNotPresent
 

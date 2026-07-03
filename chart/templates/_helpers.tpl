@@ -52,13 +52,16 @@ otherwise falls back to the resource fullname.
 
 {{/*
 Image reference. Prefer image.digest when set (immutable, best for
-production), otherwise fall back to image.tag.
+production), otherwise use image.tag. One of the two is required —
+we refuse to render an implicit `latest` so operators can't
+accidentally deploy a floating tag.
 */}}
 {{- define "renovate-datasource.image" -}}
 {{- $repo := required "image.repository is required" .Values.image.repository -}}
 {{- if .Values.image.digest -}}
 {{- printf "%s@%s" $repo .Values.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" $repo .Values.image.tag -}}
+{{- $tag := required "image.tag or image.digest is required" .Values.image.tag -}}
+{{- printf "%s:%s" $repo $tag -}}
 {{- end -}}
 {{- end -}}
