@@ -47,16 +47,13 @@ func (s *Server) handleAPKDiff(w http.ResponseWriter, r *http.Request) {
 	to := r.PathValue("to")
 	s.log.InfoContext(r.Context(), "apk diff request", "name", name, "from", from, "to", to, "remote", r.RemoteAddr, "ua", r.UserAgent())
 
-	if !apkNamePattern.MatchString(name) {
-		writeAPIError(w, http.StatusBadRequest, "The apk package name isn't well-formed.")
+	if !validateAPKName(w, name) {
 		return
 	}
-	if !apkVersionPattern.MatchString(from) {
-		writeAPIError(w, http.StatusBadRequest, "The 'from' version isn't well-formed.")
+	if !validateAPKVersion(w, "The 'from' version isn't well-formed.", from) {
 		return
 	}
-	if !apkVersionPattern.MatchString(to) {
-		writeAPIError(w, http.StatusBadRequest, "The 'to' version isn't well-formed.")
+	if !validateAPKVersion(w, "The 'to' version isn't well-formed.", to) {
 		return
 	}
 	if s.apk == nil {
@@ -90,16 +87,13 @@ func (s *Server) handleAPKDiffPage(w http.ResponseWriter, r *http.Request) {
 	from := r.PathValue("from")
 	to := r.PathValue("to")
 
-	if !apkNamePattern.MatchString(name) {
-		writeAPIError(w, http.StatusBadRequest, "The apk package name isn't well-formed.")
+	if !validateAPKName(w, name) {
 		return
 	}
-	if !apkVersionPattern.MatchString(from) {
-		writeAPIError(w, http.StatusBadRequest, "The 'from' version isn't well-formed.")
+	if !validateAPKVersion(w, "The 'from' version isn't well-formed.", from) {
 		return
 	}
-	if !apkVersionPattern.MatchString(to) {
-		writeAPIError(w, http.StatusBadRequest, "The 'to' version isn't well-formed.")
+	if !validateAPKVersion(w, "The 'to' version isn't well-formed.", to) {
 		return
 	}
 

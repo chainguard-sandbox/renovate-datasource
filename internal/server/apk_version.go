@@ -38,12 +38,10 @@ func (s *Server) handleAPKVersion(w http.ResponseWriter, r *http.Request) {
 	version := r.PathValue("version")
 	s.log.InfoContext(r.Context(), "apk version request", "name", name, "version", version, "remote", r.RemoteAddr, "ua", r.UserAgent())
 
-	if !apkNamePattern.MatchString(name) {
-		writeAPIError(w, http.StatusBadRequest, "The apk package name isn't well-formed.")
+	if !validateAPKName(w, name) {
 		return
 	}
-	if !apkVersionPattern.MatchString(version) {
-		writeAPIError(w, http.StatusBadRequest, "The version isn't well-formed.")
+	if !validateAPKVersion(w, "The version isn't well-formed.", version) {
 		return
 	}
 	if s.apk == nil {
@@ -76,12 +74,10 @@ func (s *Server) handleAPKVersionPage(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	version := r.PathValue("version")
 
-	if !apkNamePattern.MatchString(name) {
-		writeAPIError(w, http.StatusBadRequest, "The apk package name isn't well-formed.")
+	if !validateAPKName(w, name) {
 		return
 	}
-	if !apkVersionPattern.MatchString(version) {
-		writeAPIError(w, http.StatusBadRequest, "The version isn't well-formed.")
+	if !validateAPKVersion(w, "The version isn't well-formed.", version) {
 		return
 	}
 

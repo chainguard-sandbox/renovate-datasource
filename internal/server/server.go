@@ -43,6 +43,30 @@ func validRef(ref string) bool {
 	return tagPattern.MatchString(ref)
 }
 
+// validateAPKName writes a 400 to w and returns false when name doesn't
+// match apkNamePattern. Centralised so the four apk handlers stay in
+// sync on both the pattern and the client-facing error message.
+func validateAPKName(w http.ResponseWriter, name string) bool {
+	if apkNamePattern.MatchString(name) {
+		return true
+	}
+	writeAPIError(w, http.StatusBadRequest, "The apk package name isn't well-formed.")
+	return false
+}
+
+// validateAPKVersion writes a 400 to w and returns false when value
+// doesn't match apkVersionPattern. msg is inlined into the response so
+// callers can tag which version failed ("'from' version", "'to'
+// version", or just "version") without each handler repeating the
+// regex check.
+func validateAPKVersion(w http.ResponseWriter, msg, value string) bool {
+	if apkVersionPattern.MatchString(value) {
+		return true
+	}
+	writeAPIError(w, http.StatusBadRequest, msg)
+	return false
+}
+
 // Backend is the subset of *chainguard.Client the HTTP layer depends on for
 // platform-API calls (listing tags + history, readiness).
 type Backend interface {
