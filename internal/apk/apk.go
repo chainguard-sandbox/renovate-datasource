@@ -38,6 +38,13 @@ var ErrNotFound = errors.New("apk artifact not found")
 // 1 MiB; this is generous headroom.
 const fileLimit = 4 << 20
 
+// maxStreams caps how many gzip streams extractContents will walk
+// before giving up. Real apks are signature + control + data → 3
+// streams; anything wildly beyond that is either malformed or a
+// malicious artifact trying to burn CPU by burying the entries we
+// want behind thousands of empty streams.
+const maxStreams = 32
+
 // Contents is the trimmed view of an apk that the diff package consumes.
 // URL is the fully-qualified location the apk was resolved at — useful
 // for surfacing "fetched from X" provenance in the UI when the fallback
@@ -214,9 +221,12 @@ func (f *Fetcher) fetchFromSource(ctx context.Context, src repoSource, name, ver
 func extractContents(r io.Reader) (*Contents, error) {
 	br := bufio.NewReader(r)
 	out := &Contents{}
-	for {
+	for streams := 0; ; streams++ {
 		if out.Melange != nil && out.PKGINFO != nil {
 			return out, nil
+		}
+		if streams >= maxStreams {
+			return nil, fmt.Errorf("apk has more than %d gzip streams", maxStreams)
 		}
 		gr, err := gzip.NewReader(br)
 		if errors.Is(err, io.EOF) {
