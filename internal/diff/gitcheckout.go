@@ -1,8 +1,9 @@
 package diff
 
 import (
+	"cmp"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -81,9 +82,9 @@ func diffGitCheckouts(from, to parsedMelange) *GitCheckoutChanges {
 		}
 	}
 
-	sort.Slice(out.Added, func(i, j int) bool { return out.Added[i].Repository < out.Added[j].Repository })
-	sort.Slice(out.Removed, func(i, j int) bool { return out.Removed[i].Repository < out.Removed[j].Repository })
-	sort.Slice(out.Updated, func(i, j int) bool { return out.Updated[i].Repository < out.Updated[j].Repository })
+	slices.SortFunc(out.Added, func(a, b GitCheckoutEntry) int { return cmp.Compare(a.Repository, b.Repository) })
+	slices.SortFunc(out.Removed, func(a, b GitCheckoutEntry) int { return cmp.Compare(a.Repository, b.Repository) })
+	slices.SortFunc(out.Updated, func(a, b GitCheckoutDelta) int { return cmp.Compare(a.Repository, b.Repository) })
 
 	if len(out.Added) == 0 && len(out.Removed) == 0 && len(out.Updated) == 0 {
 		return nil

@@ -2,7 +2,7 @@ package diff
 
 import (
 	"reflect"
-	"sort"
+	"slices"
 	"testing"
 )
 
@@ -52,7 +52,7 @@ func TestCollectSources_DedupsAcrossApks(t *testing.T) {
 	if agg.ref.version != "v3.14.5" {
 		t.Errorf("version = %q, want v3.14.5", agg.ref.version)
 	}
-	sort.Strings(agg.apks)
+	slices.Sort(agg.apks)
 	wantApks := []string{"python-3.14", "python-3.14-base"}
 	if !reflect.DeepEqual(agg.apks, wantApks) {
 		t.Errorf("apks = %v, want %v", agg.apks, wantApks)

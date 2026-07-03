@@ -2,7 +2,6 @@ package diff
 
 import (
 	"slices"
-	"sort"
 )
 
 // sourceAggregate is one source repo as observed in a single SBOM: its host,
@@ -88,14 +87,14 @@ func diffSources(fromMap, toMap map[string]sourceAggregate) Sources {
 	for k := range keys {
 		sorted = append(sorted, k)
 	}
-	sort.Strings(sorted)
+	slices.Sort(sorted)
 
 	for _, k := range sorted {
 		from, fok := fromMap[k]
 		to, tok := toMap[k]
 		switch {
 		case !fok && tok:
-			sort.Strings(to.apks)
+			slices.Sort(to.apks)
 			out.Added = append(out.Added, SourceEntry{
 				Name:     to.ref.path,
 				Host:     to.ref.host,
@@ -104,7 +103,7 @@ func diffSources(fromMap, toMap map[string]sourceAggregate) Sources {
 				Packages: to.apks,
 			})
 		case fok && !tok:
-			sort.Strings(from.apks)
+			slices.Sort(from.apks)
 			out.Removed = append(out.Removed, SourceEntry{
 				Name:     from.ref.path,
 				Host:     from.ref.host,
@@ -113,7 +112,7 @@ func diffSources(fromMap, toMap map[string]sourceAggregate) Sources {
 				Packages: from.apks,
 			})
 		case fok && tok && from.ref.version != to.ref.version:
-			sort.Strings(to.apks)
+			slices.Sort(to.apks)
 			out.Updated = append(out.Updated, SourceDelta{
 				Name:       to.ref.path,
 				Host:       to.ref.host,

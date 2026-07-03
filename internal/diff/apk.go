@@ -1,7 +1,7 @@
 package diff
 
 import (
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -32,7 +32,7 @@ func diffAPKPackages(from, to []sbomPackage) Packages {
 			names = append(names, n)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	out := Packages{
 		Added:   []PackageEntry{},

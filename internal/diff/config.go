@@ -1,7 +1,7 @@
 package diff
 
 import (
-	"sort"
+	"slices"
 	"strings"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -55,7 +55,7 @@ func labelsDelta(from, to map[string]string) []ConfigDelta {
 	for k := range keys {
 		sorted = append(sorted, k)
 	}
-	sort.Strings(sorted)
+	slices.Sort(sorted)
 
 	var out []ConfigDelta
 	for _, k := range sorted {
