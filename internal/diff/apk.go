@@ -7,7 +7,7 @@ import (
 
 // collectAPKEntries returns every apk-ecosystem package in the SBOM.
 func collectAPKEntries(s *sbom) []sbomPackage {
-	out := make([]sbomPackage, 0)
+	out := make([]sbomPackage, 0, len(s.Packages))
 	for _, p := range s.Packages {
 		if ecosystemFromPurl(p.Purl) != "apk" {
 			continue
