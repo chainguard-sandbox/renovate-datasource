@@ -13,7 +13,6 @@ package diff
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -21,8 +20,6 @@ import (
 	spdx "github.com/spdx/tools-golang/spdx/v2/v2_3"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
-
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/oci"
 )
 
 // Response is the JSON shape returned by /v1/repo/{repo}/diff/{from}/{to}.
@@ -120,16 +117,15 @@ type ConfigDelta struct {
 
 // Fetcher is the OCI-layer dependency Compute needs. Implementations
 // should resolve refs to per-platform manifest digests and fetch the
-// corresponding image config, SPDX SBOM, and apko image-configuration
-// attestation. *oci.Fetcher in this codebase satisfies it structurally.
-// ApkoImageConfiguration may return an error wrapping oci.ErrNoApkoConfig
-// when the image carries no such attestation; Compute treats that as a
-// per-side "missing" rather than a hard failure.
+// corresponding image config plus the SPDX SBOM and apko image-
+// configuration attestations. *oci.Fetcher in this codebase satisfies it
+// structurally. SBOMAndApkoConfig returns a nil apko byte slice when the
+// image carries no apko attestation; Compute treats that as a per-side
+// "missing" rather than a hard failure.
 type Fetcher interface {
 	ResolveDigest(ctx context.Context, repo, ref string) (string, error)
 	Config(ctx context.Context, repo, ref string) (*v1.ConfigFile, error)
-	SBOMSPDX(ctx context.Context, repo, ref string) (*spdx.Document, error)
-	ApkoImageConfiguration(ctx context.Context, repo, ref string) ([]byte, error)
+	SBOMAndApkoConfig(ctx context.Context, repo, ref string) (*spdx.Document, []byte, error)
 }
 
 
@@ -164,17 +160,13 @@ func Compute(ctx context.Context, f Fetcher, repo, fromRef, toRef string) (*Resp
 		if err != nil {
 			return fmt.Errorf("%s config: %w", label, err)
 		}
-		doc, err := f.SBOMSPDX(ctx, repo, digest)
+		// A single attestation fetch feeds both the SBOM and the apko
+		// diff. A nil apkoBytes here means the image has no apko
+		// attestation — legitimate for older or non-apko-built images —
+		// and is surfaced downstream via FromApkoMissing / ToApkoMissing.
+		doc, apkoBytes, err := f.SBOMAndApkoConfig(ctx, repo, digest)
 		if err != nil {
 			return fmt.Errorf("%s sbom: %w", label, err)
-		}
-		// Apko attestations are optional — older images and any non-
-		// apko-built ones won't have one. Swallow oci.ErrNoApkoConfig
-		// so a missing attestation flags the side rather than failing
-		// the whole diff; other errors still propagate.
-		apkoBytes, err := f.ApkoImageConfiguration(ctx, repo, digest)
-		if err != nil && !errors.Is(err, oci.ErrNoApkoConfig) {
-			return fmt.Errorf("%s apko config: %w", label, err)
 		}
 		*cfgOut, *digestOut, *sbomOut, *apkoOut = cfg, digest, sbomFromSPDX(doc), apkoBytes
 		return nil
