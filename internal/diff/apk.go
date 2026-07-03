@@ -5,27 +5,21 @@ import (
 	"strings"
 )
 
-// apkEntry is one apk-ecosystem package from an SBOM. Source-repo info comes
-// from collectSources instead; this struct is intentionally minimal.
-type apkEntry struct {
-	pkg sbomPackage
-}
-
 // collectAPKEntries returns every apk-ecosystem package in the SBOM.
-func collectAPKEntries(s *sbom) []apkEntry {
-	out := make([]apkEntry, 0)
+func collectAPKEntries(s *sbom) []sbomPackage {
+	out := make([]sbomPackage, 0)
 	for _, p := range s.Packages {
 		if ecosystemFromPurl(p.Purl) != "apk" {
 			continue
 		}
-		out = append(out, apkEntry{pkg: p})
+		out = append(out, p)
 	}
 	return out
 }
 
 // diffAPKPackages joins from/to apk entries on package name and emits the
 // add/remove/update buckets.
-func diffAPKPackages(from, to []apkEntry) Packages {
+func diffAPKPackages(from, to []sbomPackage) Packages {
 	fromByName := indexAPK(from)
 	toByName := indexAPK(to)
 
@@ -51,25 +45,25 @@ func diffAPKPackages(from, to []apkEntry) Packages {
 		switch {
 		case !fok && tok:
 			out.Added = append(out.Added, PackageEntry{
-				Name:      te.pkg.Name,
-				Version:   te.pkg.Version,
+				Name:      te.Name,
+				Version:   te.Version,
 				Ecosystem: "apk",
-				Purl:      te.pkg.Purl,
+				Purl:      te.Purl,
 			})
 		case fok && !tok:
 			out.Removed = append(out.Removed, PackageEntry{
-				Name:      fe.pkg.Name,
-				Version:   fe.pkg.Version,
+				Name:      fe.Name,
+				Version:   fe.Version,
 				Ecosystem: "apk",
-				Purl:      fe.pkg.Purl,
+				Purl:      fe.Purl,
 			})
-		case fok && tok && fe.pkg.Version != te.pkg.Version:
+		case fok && tok && fe.Version != te.Version:
 			out.Updated = append(out.Updated, PackageDelta{
 				Name:      n,
-				From:      fe.pkg.Version,
-				To:        te.pkg.Version,
+				From:      fe.Version,
+				To:        te.Version,
 				Ecosystem: "apk",
-				Purl:      te.pkg.Purl,
+				Purl:      te.Purl,
 			})
 		}
 	}
@@ -81,14 +75,14 @@ func diffAPKPackages(from, to []apkEntry) Packages {
 // once as an origin/subpackage entry (`origin=`). We prefer the canonical
 // entry when both are present so subsequent joins line up with the same
 // variant that carries GENERATED_FROM relationships in collectSources.
-func indexAPK(entries []apkEntry) map[string]apkEntry {
-	m := make(map[string]apkEntry, len(entries))
+func indexAPK(entries []sbomPackage) map[string]sbomPackage {
+	m := make(map[string]sbomPackage, len(entries))
 	for _, e := range entries {
-		existing, exists := m[e.pkg.Name]
-		if exists && isCanonicalAPKPurl(existing.pkg.Purl) && !isCanonicalAPKPurl(e.pkg.Purl) {
+		existing, exists := m[e.Name]
+		if exists && isCanonicalAPKPurl(existing.Purl) && !isCanonicalAPKPurl(e.Purl) {
 			continue
 		}
-		m[e.pkg.Name] = e
+		m[e.Name] = e
 	}
 	return m
 }

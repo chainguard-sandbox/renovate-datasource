@@ -43,7 +43,7 @@ func TestCollectAPKEntries(t *testing.T) {
 		t.Fatalf("got %d entries, want 2: %+v", len(got), got)
 	}
 	for _, e := range got {
-		if ecosystemFromPurl(e.pkg.Purl) != "apk" {
+		if ecosystemFromPurl(e.Purl) != "apk" {
 			t.Errorf("non-apk entry leaked through: %+v", e)
 		}
 	}
@@ -52,36 +52,36 @@ func TestCollectAPKEntries(t *testing.T) {
 func TestIndexAPK_PrefersCanonical(t *testing.T) {
 	tests := []struct {
 		name     string
-		entries  []apkEntry
+		entries  []sbomPackage
 		wantPurl string // expected purl of the entry kept for "libcrypto3"
 	}{
 		{
 			name: "origin first then canonical",
-			entries: []apkEntry{
-				{pkg: originPkg("a", "libcrypto3", "3.6.3-r2")},
-				{pkg: apkPkg("b", "libcrypto3", "3.6.3-r2")},
+			entries: []sbomPackage{
+				originPkg("a", "libcrypto3", "3.6.3-r2"),
+				apkPkg("b", "libcrypto3", "3.6.3-r2"),
 			},
 			wantPurl: apkPkg("b", "libcrypto3", "3.6.3-r2").Purl,
 		},
 		{
 			name: "canonical first then origin",
-			entries: []apkEntry{
-				{pkg: apkPkg("a", "libcrypto3", "3.6.3-r2")},
-				{pkg: originPkg("b", "libcrypto3", "3.6.3-r2")},
+			entries: []sbomPackage{
+				apkPkg("a", "libcrypto3", "3.6.3-r2"),
+				originPkg("b", "libcrypto3", "3.6.3-r2"),
 			},
 			wantPurl: apkPkg("a", "libcrypto3", "3.6.3-r2").Purl,
 		},
 		{
 			name: "only origin",
-			entries: []apkEntry{
-				{pkg: originPkg("a", "libcrypto3", "3.6.3-r2")},
+			entries: []sbomPackage{
+				originPkg("a", "libcrypto3", "3.6.3-r2"),
 			},
 			wantPurl: originPkg("a", "libcrypto3", "3.6.3-r2").Purl,
 		},
 		{
 			name: "only canonical",
-			entries: []apkEntry{
-				{pkg: apkPkg("a", "libcrypto3", "3.6.3-r2")},
+			entries: []sbomPackage{
+				apkPkg("a", "libcrypto3", "3.6.3-r2"),
 			},
 			wantPurl: apkPkg("a", "libcrypto3", "3.6.3-r2").Purl,
 		},
@@ -93,23 +93,23 @@ func TestIndexAPK_PrefersCanonical(t *testing.T) {
 			if !ok {
 				t.Fatalf("libcrypto3 missing from index")
 			}
-			if got.pkg.Purl != tc.wantPurl {
-				t.Errorf("kept purl = %q, want %q", got.pkg.Purl, tc.wantPurl)
+			if got.Purl != tc.wantPurl {
+				t.Errorf("kept purl = %q, want %q", got.Purl, tc.wantPurl)
 			}
 		})
 	}
 }
 
 func TestDiffAPKPackages(t *testing.T) {
-	from := []apkEntry{
-		{pkg: apkPkg("1", "libcrypto3", "3.6.3-r0")},
-		{pkg: apkPkg("2", "ca-certificates-bundle", "20251006-r0")},
-		{pkg: apkPkg("3", "removed-pkg", "1.0-r0")},
+	from := []sbomPackage{
+		apkPkg("1", "libcrypto3", "3.6.3-r0"),
+		apkPkg("2", "ca-certificates-bundle", "20251006-r0"),
+		apkPkg("3", "removed-pkg", "1.0-r0"),
 	}
-	to := []apkEntry{
-		{pkg: apkPkg("1", "libcrypto3", "3.6.3-r2")},          // updated
-		{pkg: apkPkg("2", "ca-certificates-bundle", "20251006-r0")}, // unchanged
-		{pkg: apkPkg("4", "added-pkg", "2.0-r0")},             // added
+	to := []sbomPackage{
+		apkPkg("1", "libcrypto3", "3.6.3-r2"),                 // updated
+		apkPkg("2", "ca-certificates-bundle", "20251006-r0"),  // unchanged
+		apkPkg("4", "added-pkg", "2.0-r0"),                    // added
 	}
 
 	got := diffAPKPackages(from, to)
@@ -126,15 +126,15 @@ func TestDiffAPKPackages(t *testing.T) {
 	if got.Updated[0].Name != "libcrypto3" || got.Updated[0].From != "3.6.3-r0" || got.Updated[0].To != "3.6.3-r2" {
 		t.Errorf("Updated[0] = %+v, want libcrypto3 3.6.3-r0 → 3.6.3-r2", got.Updated[0])
 	}
-	if got.Updated[0].Purl == "" || got.Updated[0].Purl != to[0].pkg.Purl {
-		t.Errorf("Updated[0].Purl = %q, want to-side purl %q", got.Updated[0].Purl, to[0].pkg.Purl)
+	if got.Updated[0].Purl == "" || got.Updated[0].Purl != to[0].Purl {
+		t.Errorf("Updated[0].Purl = %q, want to-side purl %q", got.Updated[0].Purl, to[0].Purl)
 	}
 }
 
 func TestDiffAPKPackages_EmptyBuckets(t *testing.T) {
 	// Both sides identical → all buckets empty (non-nil slices, for JSON shape).
-	from := []apkEntry{{pkg: apkPkg("1", "libcrypto3", "3.6.3-r2")}}
-	to := []apkEntry{{pkg: apkPkg("1", "libcrypto3", "3.6.3-r2")}}
+	from := []sbomPackage{apkPkg("1", "libcrypto3", "3.6.3-r2")}
+	to := []sbomPackage{apkPkg("1", "libcrypto3", "3.6.3-r2")}
 	got := diffAPKPackages(from, to)
 	if len(got.Added) != 0 || len(got.Removed) != 0 || len(got.Updated) != 0 {
 		t.Errorf("expected empty buckets, got %+v", got)
@@ -148,13 +148,13 @@ func TestDiffAPKPackages_EmptyBuckets(t *testing.T) {
 func TestDiffAPKPackages_OutputSorted(t *testing.T) {
 	// Names are processed in sorted order, so the Added/Removed/Updated
 	// slices land in alphabetical order even if input was scrambled.
-	from := []apkEntry{
-		{pkg: apkPkg("1", "zebra", "1.0")},
-		{pkg: apkPkg("2", "alpha", "1.0")},
+	from := []sbomPackage{
+		apkPkg("1", "zebra", "1.0"),
+		apkPkg("2", "alpha", "1.0"),
 	}
-	to := []apkEntry{
-		{pkg: apkPkg("3", "zebra", "2.0")},
-		{pkg: apkPkg("4", "alpha", "2.0")},
+	to := []sbomPackage{
+		apkPkg("3", "zebra", "2.0"),
+		apkPkg("4", "alpha", "2.0"),
 	}
 	got := diffAPKPackages(from, to)
 	names := []string{got.Updated[0].Name, got.Updated[1].Name}
