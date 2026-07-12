@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    groups:
+      # chainguard.dev/* modules are versioned together with the platform
+      # release cadence — bump them as one PR to avoid protobuf/API skew
+      # between sdk and go-grpc-kit.
+      chainguard:
+        patterns:
+          - "chainguard.dev/*"
+      # golang.org/x/* modules move in loose lockstep with each Go
+      # release; batching keeps churn low.
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "chore"
+      include: "scope"
