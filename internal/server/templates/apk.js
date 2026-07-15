@@ -1,12 +1,9 @@
 // esc / ApiError / showError / fetchJSON / linked / repoLabel come from
-// common.js, embedded before this script.
+// common.js, embedded before this script. apiURL, fromVer, toVer are
+// injected inline by the template so this script stays agnostic about
+// which side of the symmetric diff URL it's serving.
 
-fetchJSON(
-  "/v1/apk/" + encodeURIComponent(apkName)
-    + "/diff/" + encodeURIComponent(fromVer)
-    + "/" + encodeURIComponent(toVer),
-  render,
-);
+fetchJSON(apiURL, render);
 
 function render(data) {
   document.getElementById("loading").hidden = true;

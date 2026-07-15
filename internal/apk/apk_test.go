@@ -85,13 +85,12 @@ func TestFetch(t *testing.T) {
 			srv := httptest.NewServer(tc.handler)
 			defer srv.Close()
 
-			f := New("test-org", "x86_64", staticTokenSource(wantToken))
-			// Replace the fallback chain with a single test-server source
-			// so behaviour is deterministic and we don't hit the real
-			// fallback hosts during unit tests.
-			f.sources = []repoSource{
-				{baseURL: srv.URL + "/test-org", ts: staticTokenSource(wantToken)},
-			}
+			// Point at the single test-server source so behaviour is
+			// deterministic and we don't hit the real fallback hosts
+			// during unit tests.
+			f := NewFetcher("x86_64", []Repository{
+				{BaseURL: srv.URL + "/test-org", Auth: TokenSourceAuth(staticTokenSource(wantToken))},
+			})
 
 			got, err := f.Fetch(context.Background(), "foo", "1.2.3-r0")
 			switch {
@@ -161,13 +160,12 @@ func TestFetchFallbackChain(t *testing.T) {
 	}))
 	defer notReached.Close()
 
-	f := New("test-org", "x86_64", staticTokenSource("tok"))
-	f.sources = []repoSource{
-		{baseURL: primary.URL + "/test-org", ts: staticTokenSource("tok")},
-		{baseURL: chainguard.URL + "/chainguard"},
-		{baseURL: wolfi.URL + "/os"},
-		{baseURL: notReached.URL + "/never"},
-	}
+	f := NewFetcher("x86_64", []Repository{
+		{BaseURL: primary.URL + "/test-org", Auth: TokenSourceAuth(staticTokenSource("tok"))},
+		{BaseURL: chainguard.URL + "/chainguard"},
+		{BaseURL: wolfi.URL + "/os"},
+		{BaseURL: notReached.URL + "/never"},
+	})
 
 	got, err := f.Fetch(context.Background(), "foo", "1.0-r0")
 	if err != nil {
@@ -190,11 +188,10 @@ func TestFetchAllSources404(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New("test-org", "x86_64", staticTokenSource("tok"))
-	f.sources = []repoSource{
-		{baseURL: srv.URL + "/a"},
-		{baseURL: srv.URL + "/b"},
-	}
+	f := NewFetcher("x86_64", []Repository{
+		{BaseURL: srv.URL + "/a"},
+		{BaseURL: srv.URL + "/b"},
+	})
 	_, err := f.Fetch(context.Background(), "foo", "1.0-r0")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(_, ErrNotFound)", err)
@@ -215,17 +212,81 @@ func TestFetchPropagatesNon404(t *testing.T) {
 	}))
 	defer fallback.Close()
 
-	f := New("test-org", "x86_64", staticTokenSource("tok"))
-	f.sources = []repoSource{
-		{baseURL: primary.URL + "/primary", ts: staticTokenSource("tok")},
-		{baseURL: fallback.URL + "/fallback"},
-	}
+	f := NewFetcher("x86_64", []Repository{
+		{BaseURL: primary.URL + "/primary", Auth: TokenSourceAuth(staticTokenSource("tok"))},
+		{BaseURL: fallback.URL + "/fallback"},
+	})
 	_, err := f.Fetch(context.Background(), "foo", "1.0-r0")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if errors.Is(err, ErrNotFound) {
 		t.Errorf("got ErrNotFound; want non-404 error to propagate")
+	}
+}
+
+func TestDefaultRepositories(t *testing.T) {
+	// The default repository chain drives both the fetcher and the
+	// index loader; they have to agree exactly or the diff / version
+	// endpoints will 404 on packages that only live in the virtualapk
+	// feeds. Assert the URLs directly.
+	ts := staticTokenSource("tok")
+	tests := []struct {
+		name        string
+		orgName     string
+		orgUIDP     string
+		wantURLs    []string
+		wantAuthIdx []int // indexes in wantURLs that should carry an AuthFunc
+	}{
+		{
+			name:        "full chain: private + virtualapk chainguard + virtualapk extras",
+			orgName:     "myorg",
+			orgUIDP:     "uidp-123",
+			wantURLs:    []string{"https://apk.cgr.dev/myorg", "https://virtualapk.cgr.dev/uidp-123/chainguard", "https://virtualapk.cgr.dev/uidp-123/extra-packages"},
+			wantAuthIdx: []int{0},
+		},
+		{
+			name:     "empty orgName omits the private repo",
+			orgName:  "",
+			orgUIDP:  "uidp-123",
+			wantURLs: []string{"https://virtualapk.cgr.dev/uidp-123/chainguard", "https://virtualapk.cgr.dev/uidp-123/extra-packages"},
+		},
+		{
+			name:        "empty orgUIDP omits both virtualapk feeds",
+			orgName:     "myorg",
+			orgUIDP:     "",
+			wantURLs:    []string{"https://apk.cgr.dev/myorg"},
+			wantAuthIdx: []int{0},
+		},
+		{
+			name:     "both empty yields no repositories",
+			orgName:  "",
+			orgUIDP:  "",
+			wantURLs: nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repos := DefaultRepositories(tc.orgName, tc.orgUIDP, ts)
+			if len(repos) != len(tc.wantURLs) {
+				t.Fatalf("repos len = %d, want %d (%+v)", len(repos), len(tc.wantURLs), repos)
+			}
+			for i, want := range tc.wantURLs {
+				if got := repos[i].BaseURL; got != want {
+					t.Errorf("repos[%d].BaseURL = %q, want %q", i, got, want)
+				}
+			}
+			wantAuth := map[int]bool{}
+			for _, i := range tc.wantAuthIdx {
+				wantAuth[i] = true
+			}
+			for i, r := range repos {
+				hasAuth := r.Auth != nil
+				if hasAuth != wantAuth[i] {
+					t.Errorf("repos[%d] Auth nil-ness = %v, want authed=%v", i, !hasAuth, wantAuth[i])
+				}
+			}
+		})
 	}
 }
 

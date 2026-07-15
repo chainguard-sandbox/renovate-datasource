@@ -1,13 +1,18 @@
-// Package apk pulls the user-visible metadata of Chainguard apk artifacts.
+// Package apk pulls .apk artifacts and their APKINDEX metadata from
+// Chainguard repositories.
 //
-// Lookups walk a fixed chain of repositories so packages that live in
-// the user's private org repo, the public chainguard repo, the extras
-// repo, or the wolfi os repo can all be diffed without per-call
-// configuration. Only the org-scoped lookup is authenticated.
+// Two entry points share the same repository chain (see Repository and
+// DefaultRepositories):
 //
-// One Fetch returns the .melange.yaml and the .PKGINFO. Extraction
-// stops as soon as both are captured so we never decompress the data
-// stream (typically the bulk of the apk).
+//   - Fetcher downloads a single .apk artifact, walking the chain on
+//     404, and extracts the .melange.yaml + .PKGINFO from its control
+//     section.
+//   - IndexLoader downloads each repository's APKINDEX.tar.gz, parses
+//     it, and installs the merged release list into an IndexStore.
+//
+// Keeping the two consumers on a single Repository type means anything
+// the index surfaces is also fetchable — no surprise "listed but not
+// fetchable" gaps.
 package apk
 
 import (
@@ -28,6 +33,76 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
 )
+
+// Repository describes one apk repository — an HTTP base URL plus
+// optional auth. The base URL points at the repo root (e.g.
+// `https://apk.cgr.dev/rob.best`); consumers append `/{arch}/…` for
+// their specific asset. Name is a display label used in log lines.
+type Repository struct {
+	Name    string
+	BaseURL string
+	// Auth resolves the "user:<token>" Basic-auth credential just
+	// before each request. Nil for public repos (virtualapk.cgr.dev).
+	Auth AuthFunc
+}
+
+// AuthFunc returns a "user:<token>" credential for HTTP Basic auth.
+// The signature threads a context so token exchanges can respect the
+// caller's deadline.
+type AuthFunc func(ctx context.Context) (string, error)
+
+// TokenSourceAuth adapts an oauth2.TokenSource into an AuthFunc that
+// yields "user:<accessToken>" — the shape apk.cgr.dev expects. Returns
+// nil when ts is nil so callers can pass through an unconfigured
+// token source without extra guarding.
+func TokenSourceAuth(ts oauth2.TokenSource) AuthFunc {
+	if ts == nil {
+		return nil
+	}
+	return func(_ context.Context) (string, error) {
+		tok, err := ts.Token()
+		if err != nil {
+			return "", err
+		}
+		return "user:" + tok.AccessToken, nil
+	}
+}
+
+// PackageVersion identifies an installable apk (P:/V: from an APKINDEX
+// record) — either as a real package's own identity or as one of the
+// packages that emit a `p:` capability. The diff/version handlers use
+// it to map a capability pin back to the real package whose .apk they
+// need to fetch. JSON tags feed the candidates payload the handlers
+// return on ambiguous resolution.
+type PackageVersion struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// DefaultRepositories returns the canonical Chainguard repository chain
+// for a given org: the org's private repo on apk.cgr.dev plus the two
+// per-org virtualapk views of chainguard and extra-packages. The
+// private repo is authenticated with ts; the virtualapk feeds are
+// public. Empty orgName omits the private repo (avoids a broken
+// `https://apk.cgr.dev//…` URL); empty orgUIDP omits the virtualapk
+// feeds (they need the UIDP in the path).
+func DefaultRepositories(orgName, orgUIDP string, ts oauth2.TokenSource) []Repository {
+	repos := make([]Repository, 0, 3)
+	if orgName != "" {
+		repos = append(repos, Repository{
+			Name:    orgName,
+			BaseURL: "https://apk.cgr.dev/" + orgName,
+			Auth:    TokenSourceAuth(ts),
+		})
+	}
+	if orgUIDP != "" {
+		repos = append(repos,
+			Repository{Name: "chainguard", BaseURL: "https://virtualapk.cgr.dev/" + orgUIDP + "/chainguard"},
+			Repository{Name: "extra-packages", BaseURL: "https://virtualapk.cgr.dev/" + orgUIDP + "/extra-packages"},
+		)
+	}
+	return repos
+}
 
 // ErrNotFound is returned when no repository in the fallback chain has
 // the requested apk. Distinct from "apk exists but is missing some
@@ -65,18 +140,14 @@ type Contents struct {
 type Fetcher struct {
 	arch    string
 	client  *http.Client
-	sources []repoSource
+	sources []fetchSource
 }
 
-// repoSource describes one repository in the lookup chain. ts is nil
-// for unauthenticated public repos; non-nil sources have a Basic-auth
-// header attached with `user:<token>` per Chainguard's apk.cgr.dev
-// convention. limiter caps the per-source request rate so a burst of
-// diffs against many packages can't hammer a single upstream (notably
-// the public wolfi.dev / packages.cgr.dev hosts).
-type repoSource struct {
-	baseURL string
-	ts      oauth2.TokenSource
+// fetchSource is the per-request state Fetcher keeps around each
+// Repository — the repo itself plus a per-source rate limiter so a
+// burst of diffs against many packages can't hammer a single upstream.
+type fetchSource struct {
+	repo    Repository
 	limiter *rate.Limiter
 }
 
@@ -89,28 +160,17 @@ const (
 	defaultSourceBurst = 20
 )
 
-// New constructs a Fetcher. ts must mint apk.cgr.dev-audience tokens
-// for the org-scoped primary repo. Fallback repos (chainguard, extras,
-// wolfi os) are hit unauthenticated. When orgName is empty the primary
-// source is omitted so we don't generate broken `https://apk.cgr.dev//…`
-// URLs; lookups proceed straight to the public fallbacks.
-func New(orgName, arch string, ts oauth2.TokenSource) *Fetcher {
-	limiter := func() *rate.Limiter {
-		return rate.NewLimiter(rate.Limit(defaultSourceRPS), defaultSourceBurst)
-	}
-	sources := make([]repoSource, 0, 4)
-	if orgName != "" {
-		sources = append(sources, repoSource{
-			baseURL: "https://apk.cgr.dev/" + orgName,
-			ts:      ts,
-			limiter: limiter(),
+// NewFetcher wires up a Fetcher against the given repository chain.
+// repos should typically be the same slice fed to NewIndexLoader so
+// the index and the artifact fetcher stay in sync.
+func NewFetcher(arch string, repos []Repository) *Fetcher {
+	sources := make([]fetchSource, 0, len(repos))
+	for _, r := range repos {
+		sources = append(sources, fetchSource{
+			repo:    r,
+			limiter: rate.NewLimiter(rate.Limit(defaultSourceRPS), defaultSourceBurst),
 		})
 	}
-	sources = append(sources,
-		repoSource{baseURL: "https://apk.cgr.dev/chainguard", limiter: limiter()},
-		repoSource{baseURL: "https://packages.cgr.dev/extras", limiter: limiter()},
-		repoSource{baseURL: "https://packages.wolfi.dev/os", limiter: limiter()},
-	)
 	return &Fetcher{
 		arch:    arch,
 		client:  newHTTPClient(),
@@ -164,28 +224,26 @@ func (f *Fetcher) Fetch(ctx context.Context, name, version string) (*Contents, e
 	return nil, lastErr
 }
 
-func (f *Fetcher) fetchFromSource(ctx context.Context, src repoSource, name, version string) (*Contents, error) {
-	if src.limiter != nil {
-		if err := src.limiter.Wait(ctx); err != nil {
-			return nil, fmt.Errorf("rate limiter wait for %s: %w", src.baseURL, err)
-		}
+func (f *Fetcher) fetchFromSource(ctx context.Context, src fetchSource, name, version string) (*Contents, error) {
+	if err := src.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limiter wait for %s: %w", src.repo.BaseURL, err)
 	}
 	// name and version are already validated against apkNamePattern /
 	// apkVersionPattern at the HTTP boundary, so PathEscape here is
 	// belt-and-braces — it keeps the URL well-formed even if either
 	// pattern is ever relaxed. Matches the same convention used by the
 	// apk version-page URL builder in the server package.
-	fetchURL := fmt.Sprintf("%s/%s/%s-%s.apk", src.baseURL, f.arch, url.PathEscape(name), url.PathEscape(version))
+	fetchURL := fmt.Sprintf("%s/%s/%s-%s.apk", src.repo.BaseURL, f.arch, url.PathEscape(name), url.PathEscape(version))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building apk request: %w", err)
 	}
-	if src.ts != nil {
-		tok, err := src.ts.Token()
+	if src.repo.Auth != nil {
+		cred, err := src.repo.Auth(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("getting apk.cgr.dev token: %w", err)
+			return nil, fmt.Errorf("resolving auth for %s: %w", src.repo.BaseURL, err)
 		}
-		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("user:"+tok.AccessToken)))
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cred)))
 	}
 
 	resp, err := f.client.Do(req)

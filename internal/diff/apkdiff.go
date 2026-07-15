@@ -16,8 +16,8 @@ import (
 // before and after each hunk.
 const diffContext = 3
 
-// APKDiffResponse is the JSON shape returned by /v1/apk/{name}/diff. The
-// text diff fields are unified-diff strings between the from and to
+// APKDiffResponse is the JSON shape returned by the apk diff endpoint.
+// The text diff fields are unified-diff strings between the from and to
 // apks' respective entries (empty when byte-identical). Sources is a
 // structured diff of pipeline steps extracted from the melange.yaml —
 // nil when no source pins changed.
@@ -28,9 +28,16 @@ const diffContext = 3
 // means "absent" rather than "byte-identical", and the UI surfaces
 // that distinction.
 type APKDiffResponse struct {
-	Name string `json:"name"`
-	From string `json:"from"`
-	To   string `json:"to"`
+	// Name is the package name when both sides share it (the common
+	// case). Omitted from cross-package responses so consumers know to
+	// read FromName / ToName instead.
+	Name string `json:"name,omitempty"`
+	// FromName / ToName are the real package names each side was fetched
+	// under. Always present; equal to Name in the same-package case.
+	FromName string `json:"fromName"`
+	ToName   string `json:"toName"`
+	From     string `json:"from"`
+	To       string `json:"to"`
 	// FromURL / ToURL are the fully-qualified locations each side's apk
 	// was resolved at. Displayed in the diff-page metadata header so
 	// users can see when the fallback chain served the two versions
@@ -66,27 +73,28 @@ type APKFetcher interface {
 	Fetch(ctx context.Context, name, version string) (*apk.Contents, error)
 }
 
-// ComputeAPKDiff fetches both versions' apk contents in parallel and
-// returns a unified diff of .melange.yaml and .PKGINFO plus a
-// structured diff of the source-pipeline entries (git-checkouts and
-// fetches). Errors from either fetch are surfaced verbatim so the HTTP
-// layer can map them to appropriate status codes (e.g. apk.ErrNotFound
-// → 404).
-func ComputeAPKDiff(ctx context.Context, f APKFetcher, name, fromVer, toVer string) (*APKDiffResponse, error) {
+// ComputeAPKDiff fetches both apks' contents in parallel and returns a
+// unified diff of .melange.yaml and .PKGINFO plus a structured diff of
+// the source-pipeline entries (git-checkouts and fetches). from.Name
+// and to.Name may differ — that's how the chooser page's cross-package
+// diff (e.g. nodejs-22 → nodejs-26) plumbs through. Errors from either
+// fetch are surfaced verbatim so the HTTP layer can map them to
+// appropriate status codes (e.g. apk.ErrNotFound → 404).
+func ComputeAPKDiff(ctx context.Context, f APKFetcher, from, to apk.PackageVersion) (*APKDiffResponse, error) {
 	var fromC, toC *apk.Contents
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		c, err := f.Fetch(egCtx, name, fromVer)
+		c, err := f.Fetch(egCtx, from.Name, from.Version)
 		if err != nil {
-			return fmt.Errorf("from %s: %w", fromVer, err)
+			return fmt.Errorf("from %s %s: %w", from.Name, from.Version, err)
 		}
 		fromC = c
 		return nil
 	})
 	eg.Go(func() error {
-		c, err := f.Fetch(egCtx, name, toVer)
+		c, err := f.Fetch(egCtx, to.Name, to.Version)
 		if err != nil {
-			return fmt.Errorf("to %s: %w", toVer, err)
+			return fmt.Errorf("to %s %s: %w", to.Name, to.Version, err)
 		}
 		toC = c
 		return nil
@@ -96,15 +104,19 @@ func ComputeAPKDiff(ctx context.Context, f APKFetcher, name, fromVer, toVer stri
 	}
 
 	resp := &APKDiffResponse{
-		Name:               name,
-		From:               fromVer,
-		To:                 toVer,
+		FromName:           from.Name,
+		ToName:             to.Name,
+		From:               from.Version,
+		To:                 to.Version,
 		FromURL:            fromC.URL,
 		ToURL:              toC.URL,
 		FromMelangeMissing: len(fromC.Melange) == 0,
 		ToMelangeMissing:   len(toC.Melange) == 0,
 		FromPKGINFOMissing: len(fromC.PKGINFO) == 0,
 		ToPKGINFOMissing:   len(toC.PKGINFO) == 0,
+	}
+	if from.Name == to.Name {
+		resp.Name = from.Name
 	}
 
 	if len(fromC.PKGINFO) > 0 {
@@ -118,18 +130,33 @@ func ComputeAPKDiff(ctx context.Context, f APKFetcher, name, fromVer, toVer stri
 		}
 	}
 
+	melangeLabel := from.Name + " .melange.yaml"
+	pkginfoLabel := from.Name + " .PKGINFO"
+	if from.Name != to.Name {
+		// Cross-package diff: reflect both sides in the file header so
+		// the diff output isn't ambiguous about which .melange.yaml
+		// each hunk came from.
+		melangeLabel = ".melange.yaml"
+		pkginfoLabel = ".PKGINFO"
+	}
+	fromLabel := from.Name + " " + from.Version
+	toLabel := to.Name + " " + to.Version
+	if from.Name == to.Name {
+		fromLabel, toLabel = from.Version, to.Version
+	}
+
 	// Only compute the .melange.yaml diff when both sides carry one;
 	// otherwise leave Melange empty and let the UI render the missing-
 	// side notice via FromMelangeMissing / ToMelangeMissing.
 	if len(fromC.Melange) > 0 && len(toC.Melange) > 0 {
-		melangeDiff, err := unifiedDiff(name+" .melange.yaml", fromVer, toVer, fromC.Melange, toC.Melange)
+		melangeDiff, err := unifiedDiff(melangeLabel, fromLabel, toLabel, fromC.Melange, toC.Melange)
 		if err != nil {
 			return nil, err
 		}
 		resp.Melange = melangeDiff
 	}
 
-	pkginfoDiff, err := unifiedDiff(name+" .PKGINFO", fromVer, toVer, fromC.PKGINFO, toC.PKGINFO)
+	pkginfoDiff, err := unifiedDiff(pkginfoLabel, fromLabel, toLabel, fromC.PKGINFO, toC.PKGINFO)
 	if err != nil {
 		return nil, err
 	}

@@ -224,12 +224,13 @@ function renderConfig(items) {
 }
 
 // apkLink renders a small link affordance next to each updated
-// package row that points at the dedicated /apk/{name}/diff/{from}/{to}
-// page where the per-package diff is rendered.
+// package row that points at the per-package diff page. The URL is the
+// symmetric snapshot-pair shape so it's structurally identical to a
+// cross-package diff (name repeated twice for the same-name case).
 function apkLink(item) {
-  const href = "/apk/" + encodeURIComponent(item.name)
-    + "/diff/" + encodeURIComponent(item.from)
-    + "/" + encodeURIComponent(item.to);
+  const enc = encodeURIComponent;
+  const href = "/apk/" + enc(item.name) + "/version/" + enc(item.from)
+    + "/diff/" + enc(item.name) + "/version/" + enc(item.to);
   return `<a class="apk-link" href="${esc(href)}">compare</a>`;
 }
 

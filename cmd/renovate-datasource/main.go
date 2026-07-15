@@ -27,6 +27,7 @@ type options struct {
 	cooldown           time.Duration
 	org                string
 	historyConcurrency int
+	apkIndexRefresh    time.Duration
 
 	identity      string
 	identityToken string
@@ -75,6 +76,7 @@ Authentication:
 	cmd.Flags().DurationVar(&opts.cooldown, "cooldown", 0, "default cooldown window (Go duration, e.g. 168h); can be overridden per request via ?cooldown=<dur>. 0 (default) disables it.")
 	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name (required)")
 	cmd.Flags().IntVar(&opts.historyConcurrency, "history-concurrency", 16, "max concurrent ListTagHistory calls per request")
+	cmd.Flags().DurationVar(&opts.apkIndexRefresh, "apk-index-refresh", time.Hour, "how often to re-fetch the apk indexes served under /v1/apk/{name}/releases. 0 disables the background refresh (indexes are still loaded once at startup).")
 	cmd.Flags().StringVar(&opts.identity, "identity", "", "UIDP of an assumable Chainguard identity (enables identity auth)")
 	cmd.Flags().StringVar(&opts.identityToken, "identity-token", "", "OIDC token to assume the identity; either a file path or a literal JWT")
 	_ = cmd.MarkFlagRequired("org")
@@ -117,11 +119,23 @@ func run(parent context.Context, opts *options) error {
 	}
 	fetcher := oci.New(cg.OrgName, kc)
 
-	// APK fetcher pulls .melange.yaml + .PKGINFO from apk.cgr.dev so the
-	// /v1/apk/{name}/diff endpoint can render per-package diffs. The OCI
-	// fetcher is pinned to amd64; match that arch on the apk side (apks
-	// live under /<org>/x86_64/).
-	apkFetcher := apk.New(cg.OrgName, "x86_64", cg.APKTokenSource(ctx))
+	// APK repository chain — shared between the artifact fetcher (used
+	// by the diff / version endpoints) and the index loader (which
+	// populates the releases endpoint's in-memory store). Building it
+	// once means anything the index surfaces is also fetchable — no
+	// "listed but not fetchable" gaps. OCI fetcher is pinned to amd64;
+	// match that arch on the apk side (apks live under /<repo>/x86_64/).
+	const apkArch = "x86_64"
+	apkRepos := apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx))
+	apkFetcher := apk.NewFetcher(apkArch, apkRepos)
+
+	// Initial load blocks so /v1/apk/{name}/releases is warm as soon
+	// as the listener comes up; refresh continues in the background
+	// tied to ctx.
+	apkStore, err := apk.NewIndexStoreWithRefresh(ctx, apkArch, apkRepos, opts.apkIndexRefresh, log)
+	if err != nil {
+		log.Warn("initial apk index load failed; /v1/apk/{name}/releases will 404 until the next successful refresh", "err", err)
+	}
 
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", strconv.Itoa(opts.port)),
@@ -131,6 +145,7 @@ func run(parent context.Context, opts *options) error {
 			server.WithLogger(log),
 			server.WithOrgName(cg.OrgName),
 			server.WithAPKFetcher(apkFetcher),
+			server.WithAPKIndex(apkStore),
 		).Handler(),
 		// Bound every part of a connection so a slow or stuck client can't
 		// pin a goroutine. WriteTimeout caps the worst-case diff latency —

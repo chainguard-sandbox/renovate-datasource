@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/diff"
 )
 
@@ -17,6 +18,7 @@ type options struct {
 	historyConcurrency int
 	orgName            string
 	apk                diff.APKFetcher
+	apkIndex           *apk.IndexStore
 	log                *slog.Logger
 	now                func() time.Time
 }
@@ -51,9 +53,15 @@ func WithOrgName(name string) Option {
 
 // WithAPKFetcher attaches the apk Fetcher used by the per-apk endpoints
 // to produce diffs and single-version snapshots (.melange.yaml,
-// .PKGINFO, and the parsed source-pipeline entries). When nil,
-// /v1/apk/{name}/diff and /v1/apk/{name}/version return 501 Not
-// Implemented.
+// .PKGINFO, and the parsed source-pipeline entries). When nil, the
+// per-apk diff and version endpoints return 501 Not Implemented.
 func WithAPKFetcher(f diff.APKFetcher) Option {
 	return func(o *options) { o.apk = f }
+}
+
+// WithAPKIndex attaches the in-memory apk index used by the per-package
+// releases endpoint. When nil, /v1/apk/{name}/releases returns 501 Not
+// Implemented.
+func WithAPKIndex(s *apk.IndexStore) Option {
+	return func(o *options) { o.apkIndex = s }
 }

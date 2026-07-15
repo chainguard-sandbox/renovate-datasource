@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{.Name}} = {{.Version}}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>{{.CSS}}</style>
+  <style>
+    .picker-intro { color: var(--muted); margin: 0 0 1.5em; }
+    .picker-list { list-style: none; padding: 0; margin: 0; }
+    .picker-list li { padding: .5em 0; border-bottom: 1px solid var(--border-soft); }
+    .picker-list li:last-child { border-bottom: 0; }
+    .picker-list code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .picker-list a { text-decoration: none; }
+    .picker-list a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1><span class="repo">{{.Name}}</span> = <span class="ref">{{.Version}}</span></h1>
+
+  <p class="picker-intro">
+    <code>{{.Name}}</code> is an apk capability, not an installable package, and <code>{{.Version}}</code> is provided by more than one underlying package. Pick one:
+  </p>
+
+  <ul class="picker-list">
+  {{range .Cands}}
+    <li><a href="{{.URL}}"><code>{{.Name}}={{.Version}}</code></a></li>
+  {{else}}
+    <li><em>none</em></li>
+  {{end}}
+  </ul>
+</body>
+</html>

@@ -1,63 +1,22 @@
 # Renovate Datasource
 
 A [Renovate custom datasource](https://docs.renovatebot.com/modules/datasource/custom/)
-for Chainguard images.
+for Chainguard images and APK packages.
 
-It implements two features:
+It implements two features for both images and packages:
 
-1. An optional cooldown that only surfaces tags and digests at least *N*
+1. An optional cooldown that only surfaces updates at least *N*
    time in the past.
 2. Detailed changelog URLs, via a custom UI that diffs the old and the new
-   images.
+   update.
 
 ## Configuring Renovate
 
-Here is an example that uses the datasource to update references to Chainguard
-images in dockerfiles.
+Refer to these pages for examples of configuring Renovate to use the datasource
+in different scenarios:
 
-To use this yourself, make the following changes:
-- Replace `<datasource-host>` with the hostname of the datasource running in
-  your environment
-- Remove `?cooldown=168h` from the `defaultRegistryUrlTemplate` if you aren't
-  interested in cooldown.
-- Replace every instance of `cgr\\.dev/my-org` (or `cgr.dev/my-org`) with
-  your own Chainguard organization name, or the address of your internal
-  mirror/proxy.
-
-```jsonc
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "customDatasources": {
-    "chainguard-repo": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?cooldown=168h",
-      "format": "json"
-    }
-  },
-  "packageRules": [
-    {
-      "matchManagers": ["dockerfile"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/"],
-      "enabled": false
-    },
-    {
-      "matchDatasources": ["custom.chainguard-repo"],
-      "versioning": "docker",
-      "commitMessageTopic": "cgr.dev/my-org/{{depName}}",
-      "changelogUrl": "http://<datasource-host>/repo/{{packageName}}/diff/{{#if currentDigest}}{{currentDigest}}{{else}}{{currentValue}}{{/if}}/{{#if newDigest}}{{newDigest}}{{else}}{{newValue}}{{/if}}"
-    }
-  ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "fileMatch": ["(^|/)Dockerfile$"],
-      "matchStrings": [
-        "FROM\\s+cgr\\.dev/my-org/(?<packageName>[A-Za-z0-9._/-]+):(?<currentValue>[A-Za-z0-9._-]+)(@(?<currentDigest>sha256:[a-f0-9]+))?"
-      ],
-      "datasourceTemplate": "custom.chainguard-repo",
-    }
-  ]
-}
-```
+- [Updating Images in Dockerfiles](docs/dockerfile-repo.md)
+- [Updating APK Package Versions in Dockerfiles](docs/dockerfile-apk.md)
 
 ## Build
 
@@ -134,18 +93,14 @@ service.type=LoadBalancer`), or a `kubectl port-forward` for local testing).
 
 Disabled by default. Enable it either server-wide with `--cooldown=<duration>`
 (e.g. `168h`) or per request via a `?cooldown=<duration>` query parameter on
-`/releases`. The query parameter, when present, overrides the flag.
+`/releases`. The query parameter, when present, overrides the flag. When
+used, it provides a view of the releases as of *N* time in the past.
 
-When used, it essentially provides a view of the tags that is *N* time in the
-past.
+#### Images
 
-For each tag in in the repo:
-
-- If the tag's current digest is older than the cooldown window → return the tag, the update time, and the digest as-is.
-- If the current digest is newer than the cooldown window → walk the tag's history and return the most recent digest that *was* old enough.
-- If no historical digest satisfies the cooldown → omit the tag.
-
-A `GET /v1/repo/{repo}/releases` response looks like:
+The datasource lists tags with
+[`/registry/v1/tags`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags)
+and formats the results in the expected format.
 
 ```json
 {
@@ -164,10 +119,60 @@ A `GET /v1/repo/{repo}/releases` response looks like:
 }
 ```
 
+Where the timestamp of a tag falls within the cooldown window, the tag history
+API ([`/registry/v1/tags/{parentId}/history`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags/{parentId}/history))
+is used to rewind the tag back to the latest digest outside of the window.
+
+If no historical digest satisfies the cooldown then the tag is omitted from the
+results entirely.
+
+#### APKs
+
+The datasource pulls the APKINDEX for each of the organization's repositories
+at startup and regularly refreshes it according to the value of
+`--apk-index-refresh` (default `1h`).
+
+```
+https://apk.cgr.dev/<org-name>
+https://virtualapk.cgr.dev/<org-id>/chainguard
+https://virtualapk.cgr.dev/<org-id>/extra-packages
+```
+
+It uses the `t:` field in the index as the `releaseTimestamp` and omits versions
+where the timestamp falls inside the cooldown window.
+
+```json
+{
+  "releases": [
+    {
+      "version": "3.14.5-r0",
+      "releaseTimestamp": "2026-06-10T20:18:06.42Z",
+    },
+    {
+      "version": "3.14.6-r1",
+      "releaseTimestamp": "2026-06-14T18:46:31.317Z",
+    }
+  ]
+}
+```
+
+This supports provides and prefixed capabilities as well:
+1. For instance `nodejs` will return all versions for the packages that provide it
+   (`nodejs-26`, `nodejs-25` etc)
+2. And `cmd:gcloud`, which will return versions for `google-cloud-sdk`.
+
+
 ### Changelogs
 
-Visiting `https://<datasource-host>/repo/node/diff/{{currentDigest}}/{{newDigest}}`
-will show a changelog that compares the differences between the two images.
+#### Images
 
-It does this by fetching the image config, SBOMs and package metadata for each
-image and comparing the contents.
+The datasource hosts a site at `/repo/{repo}/diff/{fromRef}/{toRef}` which
+compares the image configuration, SBOMs and apko definitions of the two
+tags/digests.
+
+#### APKs
+
+The datasource hosts a site at
+`/apk/{fromName}/version/{fromVer}/diff/{toName}/version/{toVer}` that
+extracts and compares the `.melange.yaml` and `.PKGINFO` files from the
+control-section of the APK packages.

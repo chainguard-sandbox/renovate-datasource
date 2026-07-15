@@ -2,16 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{.Name}}: {{.From}} → {{.To}}</title>
+  <title>{{if eq .FromName .ToName}}{{.FromName}}: {{.From}} → {{.To}}{{else}}{{.FromName}} {{.From}} → {{.ToName}} {{.To}}{{end}}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>{{.CSS}}</style>
 </head>
 <body>
   <h1>
-    <span class="repo">{{.Name}}</span>:
-    <a class="ref from" href="{{.FromURL}}">{{.From}}</a>
-    <span class="arrow">→</span>
-    <a class="ref to" href="{{.ToURL}}">{{.To}}</a>
+    {{if eq .FromName .ToName}}
+      <span class="repo">{{.FromName}}</span>:
+      <a class="ref from" href="{{.FromURL}}">{{.From}}</a>
+      <span class="arrow">→</span>
+      <a class="ref to" href="{{.ToURL}}">{{.To}}</a>
+    {{else}}
+      <a class="ref from" href="{{.FromURL}}"><span class="repo">{{.FromName}}</span> {{.From}}</a>
+      <span class="arrow">→</span>
+      <a class="ref to" href="{{.ToURL}}"><span class="repo">{{.ToName}}</span> {{.To}}</a>
+    {{end}}
   </h1>
 
   <div id="loading"><span class="spinner"></span>Loading apk diff…</div>
@@ -36,7 +42,7 @@
   </div>
 
   <script>
-    const apkName = {{.Name}};
+    const apiURL = {{.APIURL}};
     const fromVer = {{.From}};
     const toVer = {{.To}};
   </script>

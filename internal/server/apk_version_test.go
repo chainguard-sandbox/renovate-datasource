@@ -130,3 +130,91 @@ func TestHandleAPKVersionPage(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleAPKVersion_RedirectsWhenCapabilityResolvesUniquely(t *testing.T) {
+	// /apk/nodejs/version/24.14.0-r0 is a capability that resolves to a
+	// single real provider (nodejs-24). Both the JSON and HTML endpoints
+	// should 302 to the underlying package's URL.
+	h := New(nil, nil, WithAPKFetcher(&stubAPKFetcher{}), WithAPKIndex(providesStore(t))).Handler()
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"JSON", "/v1/apk/nodejs/version/24.14.0-r0", "/v1/apk/nodejs-24/version/24.14.0-r0"},
+		{"HTML", "/apk/nodejs/version/24.14.0-r0", "/apk/nodejs-24/version/24.14.0-r0"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, want 302 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Location"); got != tc.want {
+				t.Errorf("Location = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHandleAPKVersion_MultipleChoicesWhenAmbiguous(t *testing.T) {
+	// cmd:node=26.4.0-r1 has two providers in providesStore. The JSON
+	// endpoint surfaces 300 Multiple Choices with the candidate list.
+	h := New(nil, nil, WithAPKFetcher(&stubAPKFetcher{}), WithAPKIndex(providesStore(t))).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/v1/apk/cmd:node/version/26.4.0-r1", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMultipleChoices {
+		t.Fatalf("status = %d, want 300 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var got apkResolution
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Name != "cmd:node" || got.Version != "26.4.0-r1" {
+		t.Errorf("Name/Version mismatch: %+v", got)
+	}
+	if len(got.Providers) != 2 {
+		t.Errorf("Providers len = %d, want 2 (nodejs-26 + nodejs-26-minimal): %+v", len(got.Providers), got.Providers)
+	}
+}
+
+func TestHandleAPKVersionPage_PickerWhenAmbiguous(t *testing.T) {
+	// HTML counterpart: the picker page lists per-provider snapshot
+	// links and mentions the capability.
+	h := New(nil, nil, WithAPKFetcher(&stubAPKFetcher{}), WithAPKIndex(providesStore(t))).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/apk/cmd:node/version/26.4.0-r1", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"/apk/nodejs-26/version/26.4.0-r1",
+		"/apk/nodejs-26-minimal/version/26.4.0-r1",
+		"apk capability",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("picker page missing %q\n---\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleAPKVersion_PrefixedNameAllowed(t *testing.T) {
+	// The validator was loosened for the version endpoint so URLs like
+	// /apk/cmd:node/version/24.14.0-r0 route correctly instead of 400'ing.
+	h := New(nil, nil, WithAPKFetcher(&stubAPKFetcher{}), WithAPKIndex(providesStore(t))).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/apk/cmd:node/version/22.14.0-r0", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	// Single provider → 302 (see providesStore).
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/apk/nodejs-22/version/22.14.0-r0" {
+		t.Errorf("Location = %q, want /apk/nodejs-22/version/22.14.0-r0", got)
+	}
+}
