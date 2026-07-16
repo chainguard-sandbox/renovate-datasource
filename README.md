@@ -1,5 +1,8 @@
 # Renovate Datasource
 
+> [!WARNING]
+> This project is developed by the Chainguard Professional Services team and maintenance is provided on a best-effort basis.
+
 A [Renovate custom datasource](https://docs.renovatebot.com/modules/datasource/custom/)
 for Chainguard images and APK packages.
 
@@ -9,6 +12,31 @@ It implements two features for both images and packages:
    time in the past.
 2. Detailed changelog URLs, via a custom UI that diffs the old and the new
    update.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="images/pr-body.webp"><img src="images/pr-body.webp" width="280" alt="Renovate PR body"></a><br>
+      <sub>Renovate PR body</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="images/dockerfile-diff.webp"><img src="images/dockerfile-diff.webp" width="280" alt="Dockerfile diff"></a><br>
+      <sub>Dockerfile diff</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="images/image-diff.webp"><img src="images/image-diff.webp" width="280" alt="Image diff"></a><br>
+      <sub>Image diff</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="images/apk-diff.webp"><img src="images/apk-diff.webp" width="280" alt="APK diff"></a><br>
+      <sub>APK diff</sub>
+    </td>
+  </tr>
+</table>
 
 ## Configuring Renovate
 
@@ -46,12 +74,9 @@ chainctl auth login
 
 ### Kubernetes
 
-A Helm chart lives at [`chart/`](chart/). It renders a ServiceAccount,
-Deployment, and Service; the pod uses a projected service-account token
-to authenticate as a Chainguard assumable identity, so no long-lived
-credentials are mounted.
+Deploy to Kubernetes with the provided [Helm chart](chart/).
 
-Create an assumable identity as described in [the
+Firstly, create an assumable identity as described in [the
 documentation](https://edu.chainguard.dev/chainguard/administration/assumable-ids/identity-examples/kubernetes-identity/)
 with the `registry.pull` and `apk.pull` roles. Assuming the service is
 deployed to the `chainguard` namespace and the issuer URL of your cluster
@@ -68,7 +93,7 @@ chainctl iam identity create renovate-datasource \
 
 Note the printed identity UIDP — that's the value for `identity` below.
 
-Install the chart, supplying your own org, identity UIDP and image details:
+Then, install the chart, supplying your own org, identity UIDP and image details:
 
 ```
 helm install renovate-datasource ./chart \
