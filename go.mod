@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	chainguard.dev/go-grpc-kit v0.17.17
-	chainguard.dev/sdk v0.1.111
+	chainguard.dev/sdk v0.1.123
 	github.com/google/go-containerregistry v0.21.7
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/sigstore/cosign/v3 v3.1.1
