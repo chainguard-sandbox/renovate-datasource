@@ -64,7 +64,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	resp, err := diff.Compute(ctx, s.fetcher, repo, from, to)
+	resp, err := diff.Compute(ctx, s.fetcher, s.grype, repo, from, to)
 	if err != nil {
 		status, msg := classifyDiffError(err)
 		// 5xx errors deserve an ERROR log line — the server is the source

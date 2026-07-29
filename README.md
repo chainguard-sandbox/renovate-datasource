@@ -195,6 +195,10 @@ The datasource hosts a site at `/repo/{repo}/diff/{fromRef}/{toRef}` which
 compares the image configuration, SBOMs and apko definitions of the two
 tags/digests.
 
+The page also surfaces the changes in vulnerabilities between the two images by
+scanning both SBOMs with `grype`. This behaviour can be disabled with
+`--grype-scan=false`.
+
 #### APKs
 
 The datasource hosts a site at

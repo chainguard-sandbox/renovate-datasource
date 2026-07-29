@@ -20,6 +20,7 @@ function render(data) {
   if (data.from.mainPackage) mainSet.add(data.from.mainPackage);
   if (data.to.mainPackage) mainSet.add(data.to.mainPackage);
 
+  renderVulnerabilities(data.vulnerabilities);
   renderPackages(data.packages || {}, mainSet);
   renderSources(data.sources || {}, mainSet);
   renderDiffSection(
@@ -119,6 +120,152 @@ function renderPackages(pkg, mainSet) {
     }
   }
   sec.innerHTML = parts.length ? parts.join("") : '<p class="empty">No package changes.</p>';
+}
+
+// renderVulnerabilities renders the vulnerability delta. Missing
+// data hides the section; empty data renders a "no changes" note.
+function renderVulnerabilities(vulns) {
+  const section = document.getElementById("vulnerabilities-section");
+  if (!vulns) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  const introduced = sortBySeverity(vulns.added || []);
+  const fixed = sortBySeverity(vulns.removed || []);
+  const el = document.getElementById("vulnerabilities");
+  if (!introduced.length && !fixed.length) {
+    el.innerHTML = '<p class="empty">No vulnerability changes.</p>';
+    return;
+  }
+  const parts = [];
+  if (introduced.length) {
+    parts.push("<h3>Introduced (" + introduced.length + ")</h3>");
+    for (const v of introduced) {
+      parts.push(vulnerabilityRow(v, "introduced"));
+    }
+  }
+  if (fixed.length) {
+    parts.push("<h3>Fixed (" + fixed.length + ")</h3>");
+    for (const v of fixed) {
+      parts.push(vulnerabilityRow(v, "fixed"));
+    }
+  }
+  el.innerHTML = parts.join("");
+}
+
+// severityRank orders grype severities most→least urgent; unknown
+// sorts to the bottom.
+function severityRank(s) {
+  switch ((s || "").toLowerCase()) {
+    case "critical": return 0;
+    case "high":     return 1;
+    case "medium":   return 2;
+    case "low":      return 3;
+    case "negligible": return 4;
+    default:         return 5;
+  }
+}
+
+function sortBySeverity(cs) {
+  const out = cs.slice();
+  out.sort((a, b) => {
+    const s = severityRank(a.severity) - severityRank(b.severity);
+    if (s !== 0) return s;
+    // Higher CVSS first within a severity; unscored sorts last.
+    const av = a.cvss && typeof a.cvss.score === "number" ? a.cvss.score : -1;
+    const bv = b.cvss && typeof b.cvss.score === "number" ? b.cvss.score : -1;
+    if (av !== bv) return bv - av;
+    return (a.id || "").localeCompare(b.id || "");
+  });
+  return out;
+}
+
+function vulnerabilityRow(v, kind) {
+  const sev = (v.severity || "unknown").toLowerCase();
+  const pkgs = v.packages || [];
+  const link = vulnerabilityLink(v);
+  const kev = v.kev ? '<span class="vuln-kev" title="CISA Known Exploited Vulnerability">KEV</span>' : "";
+  const cvss = v.cvss ? `<span class="vuln-cvss" title="${esc(v.cvss.vector || "")}">CVSS ${esc(String(v.cvss.score))}</span>` : "";
+  const summary = `<summary class="row vuln ${esc(kind)}">
+    <span class="vuln-sev sev-${esc(sev)}">${esc(v.severity || "Unknown")}</span>
+    ${link}${kev}${cvss}
+    <span class="vuln-pkgs">${pkgs.map(vulnerabilityPkgTag).join("")}</span>
+  </summary>`;
+  return `<details class="vuln-details">${summary}${vulnerabilityDetailsBody(v)}</details>`;
+}
+
+// vulnerabilityPkgTag renders one affected package as
+// `name=version [type]` for the collapsed summary line.
+function vulnerabilityPkgTag(pkg) {
+  const type = pkg.type ? `<span class="vuln-type">${esc(pkg.type)}</span>` : "";
+  return `<span class="vuln-pkg mono">${esc(pkg.name || "")}=${esc(pkg.version || "")}</span>${type}`;
+}
+
+// vulnerabilityDetailsBody renders the expanded panel: description,
+// affected packages, and reference URLs. Missing sections drop.
+function vulnerabilityDetailsBody(v) {
+  const parts = [];
+  if (v.description) {
+    parts.push(`<div class="vuln-desc">${esc(v.description)}</div>`);
+  }
+  const pkgs = v.packages || [];
+  if (pkgs.length) {
+    const rows = pkgs.map((p) => {
+      const type = p.type ? `<span class="vuln-type">${esc(p.type)}</span>` : "";
+      const fixes = (p.fixVersions || []).length
+        ? (p.fixVersions).map((v) => `<span class="mono">${esc(v)}</span>`).join(", ")
+        : "—";
+      const state = p.fixState ? `<span class="vuln-fixstate vuln-fixstate-${esc((p.fixState || "").toLowerCase())}">${esc(p.fixState)}</span>` : "";
+      return `<tr>
+        <td class="mono">${esc(p.name || "")}</td>
+        <td class="mono">${esc(p.version || "")}</td>
+        <td>${type}</td>
+        <td>${fixes}</td>
+        <td>${state}</td>
+      </tr>`;
+    }).join("");
+    parts.push(`<table class="vuln-pkg-table">
+      <thead><tr><th>Package</th><th>Version</th><th>Type</th><th>Fixed in</th><th>Fix state</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`);
+  }
+  const urls = (v.urls || []).filter(isSafeHTTPURL);
+  if (urls.length) {
+    const items = urls.map((u) => `<li><a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a></li>`).join("");
+    parts.push(`<div class="vuln-refs">
+      <h4>References</h4>
+      <ul>${items}</ul>
+    </div>`);
+  }
+  return parts.length ? `<div class="vuln-body">${parts.join("")}</div>` : "";
+}
+
+// vulnerabilityLink picks the best URL for the ID, falling back to
+// advisoryURLFor when no advisory refs were attached. Non-http(s)
+// URLs are dropped to avoid `javascript:`-scheme XSS.
+function vulnerabilityLink(v) {
+  const id = v.id || "";
+  const urls = (v.urls || []).filter(isSafeHTTPURL);
+  const href = urls.length ? urls[0] : advisoryURLFor(id);
+  return `<a class="vuln-id mono" href="${esc(href)}" target="_blank" rel="noopener">${esc(id)}</a>`;
+}
+
+// isSafeHTTPURL keeps only http(s) references; everything else is
+// dropped rather than escaped.
+function isSafeHTTPURL(u) {
+  return typeof u === "string" && /^https?:\/\//i.test(u);
+}
+
+function advisoryURLFor(id) {
+  if (id.startsWith("GHSA-")) {
+    return "https://github.com/advisories/" + encodeURIComponent(id);
+  }
+  if (id.startsWith("CVE-")) {
+    return "https://nvd.nist.gov/vuln/detail/" + encodeURIComponent(id);
+  }
+  return "";
 }
 
 // apkVersionLink wraps a version reference in a link to its

@@ -33,6 +33,11 @@ spec:
             {{- with .Values.historyConcurrency }}
             - --history-concurrency={{ . }}
             {{- end }}
+            - --grype-scan={{ .Values.grype.scan }}
+            {{- if .Values.grype.scan }}
+            - --grype-db-dir=/var/cache/renovate-datasource/db
+            - --grype-db-refresh={{ .Values.grype.dbRefresh }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.port }}
@@ -52,6 +57,10 @@ spec:
             - name: chainguard-token
               mountPath: {{ .Values.identityToken.mountPath }}
               readOnly: true
+            {{- if .Values.grype.scan }}
+            - name: grype-db
+              mountPath: /var/cache/renovate-datasource/db
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -70,6 +79,13 @@ spec:
                   audience: {{ .Values.identityToken.audience }}
                   expirationSeconds: {{ .Values.identityToken.expirationSeconds }}
                   path: token
+        {{- if .Values.grype.scan }}
+        # Writable scratch for the grype DB (readOnlyRootFilesystem
+        # blocks writes elsewhere).
+        - name: grype-db
+          emptyDir:
+            sizeLimit: {{ .Values.grype.dbSizeLimit }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

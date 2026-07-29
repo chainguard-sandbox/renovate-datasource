@@ -11,6 +11,7 @@ import (
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/diff"
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/grype"
 )
 
 // Conservative repo-name pattern: lowercase, digits, dashes, underscores,
@@ -101,6 +102,7 @@ type Server struct {
 	fetcher            diff.Fetcher
 	apk                diff.APKFetcher
 	apkIndex           *apk.IndexStore
+	grype              *grype.DB
 	cooldown           time.Duration
 	historyConcurrency int
 	orgName            string
@@ -126,6 +128,7 @@ func New(backend Backend, fetcher diff.Fetcher, opts ...Option) *Server {
 		fetcher:            fetcher,
 		apk:                o.apk,
 		apkIndex:           o.apkIndex,
+		grype:              o.grype,
 		cooldown:           o.cooldown,
 		historyConcurrency: o.historyConcurrency,
 		orgName:            o.orgName,

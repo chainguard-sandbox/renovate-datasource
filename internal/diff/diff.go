@@ -5,6 +5,7 @@
 //   - apk package changes (added / removed / updated)
 //   - upstream source-repo changes (github/gitlab repos the apks vendored)
 //   - selected image-config field changes
+//   - vulnerability deltas (introduced / fixed) when a grype scanner is supplied
 //
 // The package is HTTP-free: the server handler calls Compute and JSON-
 // encodes the returned *Response.
@@ -13,6 +14,7 @@ package diff
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,6 +22,8 @@ import (
 	spdx "github.com/spdx/tools-golang/spdx/v2/v2_3"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
+
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/grype"
 )
 
 // Response is the JSON shape returned by /v1/repo/{repo}/diff/{from}/{to}.
@@ -31,14 +35,15 @@ import (
 // FromApkoMissing / ToApkoMissing flag is set so the UI can render a
 // "no attestation on X" notice instead of implying byte-identical).
 type Response struct {
-	From             Ref           `json:"from"`
-	To               Ref           `json:"to"`
-	Packages         Packages      `json:"packages"`
-	Sources          Sources       `json:"sources"`
-	Config           []ConfigDelta `json:"config"`
-	ApkoConfig       string        `json:"apkoConfig,omitempty"`
-	FromApkoMissing  bool          `json:"fromApkoMissing,omitempty"`
-	ToApkoMissing    bool          `json:"toApkoMissing,omitempty"`
+	From            Ref              `json:"from"`
+	To              Ref              `json:"to"`
+	Vulnerabilities *Vulnerabilities `json:"vulnerabilities,omitempty"`
+	Packages        Packages         `json:"packages"`
+	Sources         Sources          `json:"sources"`
+	Config          []ConfigDelta    `json:"config"`
+	ApkoConfig      string           `json:"apkoConfig,omitempty"`
+	FromApkoMissing bool             `json:"fromApkoMissing,omitempty"`
+	ToApkoMissing   bool             `json:"toApkoMissing,omitempty"`
 }
 
 type Ref struct {
@@ -144,20 +149,19 @@ const mainPackageLabel = "dev.chainguard.package.main"
 // (packages + relationships) on each side because the per-source
 // changelog URLs are derived from SPDX GENERATED_FROM links between each
 // apk and its upstream github/gitlab source.
-func Compute(ctx context.Context, f Fetcher, repo, fromRef, toRef string) (*Response, error) {
-	var (
-		fromCfg, toCfg       *v1.ConfigFile
-		fromDigest, toDigest string
-		fromSBOM, toSBOM     *sbom
-		fromApko, toApko     []byte
-	)
+//
+// grypeScanner is optional: nil, or grype.ErrDBNotLoaded from the
+// scanner, omits the Vulnerabilities section but keeps the rest of
+// the diff. Any other scan error fails the whole Compute call.
+func Compute(ctx context.Context, f Fetcher, grypeScanner GrypeScanner, repo, fromRef, toRef string) (*Response, error) {
+	var from, to imageDetails
 
-	fetchSide := func(ctx context.Context, ref string, cfgOut **v1.ConfigFile, digestOut *string, sbomOut **sbom, apkoOut *[]byte, label string) error {
+	fetchImageDetails := func(ctx context.Context, ref, label string, out *imageDetails) error {
 		digest, err := f.ResolveDigest(ctx, repo, ref)
 		if err != nil {
 			return fmt.Errorf("%s resolve: %w", label, err)
 		}
-		*digestOut = digest
+		out.digest = digest
 
 		inner, innerCtx := errgroup.WithContext(ctx)
 		inner.Go(func() error {
@@ -165,7 +169,7 @@ func Compute(ctx context.Context, f Fetcher, repo, fromRef, toRef string) (*Resp
 			if err != nil {
 				return fmt.Errorf("%s config: %w", label, err)
 			}
-			*cfgOut = cfg
+			out.cfg = cfg
 			return nil
 		})
 		inner.Go(func() error {
@@ -178,53 +182,86 @@ func Compute(ctx context.Context, f Fetcher, repo, fromRef, toRef string) (*Resp
 			if err != nil {
 				return fmt.Errorf("%s sbom: %w", label, err)
 			}
-			*sbomOut = sbomFromSPDX(doc)
-			*apkoOut = apkoBytes
+			out.sbom = sbomFromSPDX(doc)
+			out.apko = apkoBytes
+			if grypeScanner != nil {
+				// Re-marshal the parsed SPDX back to JSON for grype.
+				sbomBytes, err := json.Marshal(doc)
+				if err != nil {
+					return fmt.Errorf("%s sbom re-marshal: %w", label, err)
+				}
+				ms, err := grypeScanner.Scan(innerCtx, sbomBytes)
+				switch {
+				case errors.Is(err, grype.ErrDBNotLoaded):
+					// out.vulns stays nil; assembly drops the section.
+				case err != nil:
+					return fmt.Errorf("%s vulnerability scan: %w", label, err)
+				default:
+					out.vulns = &imageVulnerabilities{matches: ms}
+				}
+			}
 			return nil
 		})
 		return inner.Wait()
 	}
 
 	eg, egCtx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return fetchSide(egCtx, fromRef, &fromCfg, &fromDigest, &fromSBOM, &fromApko, "from")
-	})
-	eg.Go(func() error {
-		return fetchSide(egCtx, toRef, &toCfg, &toDigest, &toSBOM, &toApko, "to")
-	})
+	eg.Go(func() error { return fetchImageDetails(egCtx, fromRef, "from", &from) })
+	eg.Go(func() error { return fetchImageDetails(egCtx, toRef, "to", &to) })
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
 
-	packages := diffAPKPackages(collectAPKEntries(fromSBOM), collectAPKEntries(toSBOM))
+	packages := diffAPKPackages(collectAPKEntries(from.sbom), collectAPKEntries(to.sbom))
 
 	resp := &Response{
 		From: Ref{
-			Digest:      fromDigest,
-			Timestamp:   formatTimestamp(fromCfg.Created.Time),
-			Platform:    platformOf(fromCfg),
-			MainPackage: fromCfg.Config.Labels[mainPackageLabel],
+			Digest:      from.digest,
+			Timestamp:   formatTimestamp(from.cfg.Created.Time),
+			Platform:    platformOf(from.cfg),
+			MainPackage: from.cfg.Config.Labels[mainPackageLabel],
 		},
 		To: Ref{
-			Digest:      toDigest,
-			Timestamp:   formatTimestamp(toCfg.Created.Time),
-			Platform:    platformOf(toCfg),
-			MainPackage: toCfg.Config.Labels[mainPackageLabel],
+			Digest:      to.digest,
+			Timestamp:   formatTimestamp(to.cfg.Created.Time),
+			Platform:    platformOf(to.cfg),
+			MainPackage: to.cfg.Config.Labels[mainPackageLabel],
 		},
 		Packages:        packages,
-		Sources:         diffSources(collectSources(fromSBOM), collectSources(toSBOM)),
-		Config:          diffConfig(fromCfg, toCfg),
-		FromApkoMissing: len(fromApko) == 0,
-		ToApkoMissing:   len(toApko) == 0,
+		Sources:         diffSources(collectSources(from.sbom), collectSources(to.sbom)),
+		Config:          diffConfig(from.cfg, to.cfg),
+		FromApkoMissing: len(from.apko) == 0,
+		ToApkoMissing:   len(to.apko) == 0,
 	}
-	if len(fromApko) > 0 && len(toApko) > 0 {
-		apkoDiff, err := diffApkoConfig(fromDigest, toDigest, fromApko, toApko)
+	// Both sides must have scanned — a one-sided scan would paint the
+	// loaded side's vulns as all introduced/removed.
+	if from.vulns != nil && to.vulns != nil {
+		vulns := diffVulnerabilities(from.vulns.matches, to.vulns.matches)
+		resp.Vulnerabilities = &vulns
+	}
+	if len(from.apko) > 0 && len(to.apko) > 0 {
+		apkoDiff, err := diffApkoConfig(from.digest, to.digest, from.apko, to.apko)
 		if err != nil {
 			return nil, fmt.Errorf("apko config diff: %w", err)
 		}
 		resp.ApkoConfig = apkoDiff
 	}
 	return resp, nil
+}
+
+// imageDetails collects the per-image artifacts fetchImageDetails
+// pulls down.
+type imageDetails struct {
+	cfg    *v1.ConfigFile
+	digest string
+	sbom   *sbom
+	apko   []byte
+	vulns  *imageVulnerabilities
+}
+
+// imageVulnerabilities holds one image's grype scan result.
+type imageVulnerabilities struct {
+	matches []grype.Match
 }
 
 // platformOf renders a ConfigFile's OS+Architecture as "os/arch", falling

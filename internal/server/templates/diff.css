@@ -184,6 +184,119 @@ h1 a.ref:hover { text-decoration-thickness: 2px; }
   margin-left: .4em;
   vertical-align: .1em;
 }
+
+/* Vulnerabilities section — `introduced` / `fixed` mirror the
+   `added` / `removed` convention used elsewhere. */
+.row.vuln { display: flex; align-items: baseline; gap: .6em; flex-wrap: wrap; }
+.row.vuln.introduced .vuln-id::before { content: "+ "; color: var(--rem); }
+.row.vuln.fixed .vuln-id::before       { content: "− "; color: var(--add); }
+.vuln-id { font-weight: 600; }
+.vuln-pkgs { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .35em .5em; }
+.vuln-pkg { font-size: .9em; }
+.vuln-type {
+  font-size: .7em;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 0 .3em;
+  border-radius: 3px;
+}
+.vuln-sev {
+  display: inline-block;
+  font-size: .7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 0 .4em;
+  border-radius: 3px;
+  min-width: 5.5em;
+  text-align: center;
+  color: #fff;
+}
+.sev-critical   { background: #7f1d1d; }
+.sev-high       { background: #b91c1c; }
+.sev-medium     { background: #d97706; }
+.sev-low        { background: #ca8a04; }
+.sev-negligible { background: #6b7280; }
+.sev-unknown    { background: #9ca3af; }
+
+/* KEV uses the critical-red palette to flag active exploitation
+   even on lower-severity entries. */
+.vuln-kev {
+  display: inline-block;
+  font-size: .7em;
+  font-weight: 700;
+  letter-spacing: .05em;
+  padding: 0 .4em;
+  border-radius: 3px;
+  background: #7f1d1d;
+  color: #fff;
+  text-transform: uppercase;
+}
+.vuln-cvss {
+  display: inline-block;
+  font-size: .75em;
+  font-weight: 600;
+  padding: 0 .4em;
+  border-radius: 3px;
+  background: var(--bg-soft);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: help;
+}
+
+/* Collapsible vulnerability row. Custom ▸/▾ replaces the native
+   disclosure triangle to stay aligned with the flex row. */
+.vuln-details { margin: 0; }
+.vuln-details > summary { list-style: none; cursor: pointer; }
+.vuln-details > summary::-webkit-details-marker { display: none; }
+.vuln-details > summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: .8em;
+  width: 1em;
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+.vuln-details[open] > summary::before { transform: rotate(90deg); }
+.vuln-details[open] > summary { background: var(--bg-soft); }
+.vuln-body {
+  padding: .75em 1em .5em;
+  border-left: 3px solid var(--border);
+  margin: .25em 0 .75em .3em;
+  font-size: .9em;
+}
+.vuln-desc { margin-bottom: .75em; color: var(--fg); }
+.vuln-pkg-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: .75em;
+  font-size: .9em;
+}
+.vuln-pkg-table th,
+.vuln-pkg-table td {
+  border-bottom: 1px solid var(--border-soft);
+  padding: .35em .5em;
+  text-align: left;
+  vertical-align: baseline;
+}
+.vuln-pkg-table th { font-weight: 600; color: var(--muted); font-size: .85em; text-transform: uppercase; letter-spacing: .04em; }
+.vuln-fixstate {
+  display: inline-block;
+  font-size: .75em;
+  font-weight: 600;
+  padding: 0 .4em;
+  border-radius: 3px;
+  text-transform: capitalize;
+}
+.vuln-fixstate-fixed     { background: #dcfce7; color: #14532d; }
+.vuln-fixstate-not-fixed { background: #fee2e2; color: #7f1d1d; }
+.vuln-fixstate-wont-fix  { background: #fef3c7; color: #78350f; }
+.vuln-fixstate-unknown   { background: var(--bg-soft); color: var(--muted); }
+.vuln-refs h4 { font-size: .85em; margin: .5em 0 .25em; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.vuln-refs ul { margin: 0; padding-left: 1.2em; }
+.vuln-refs li { word-break: break-all; margin: .15em 0; }
 .meta-main { color: var(--fg); font-weight: 500; }
 .pkg-ref {
   font-size: .85em;
