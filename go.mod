@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	chainguard.dev/go-grpc-kit v0.17.17
 	chainguard.dev/sdk v0.1.123
+	github.com/anchore/clio v0.1.1
 	github.com/anchore/grype v0.116.0
 	github.com/anchore/syft v1.48.0
 	github.com/google/go-containerregistry v0.21.7
@@ -15,7 +16,7 @@ require (
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/time v0.15.0
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -50,7 +51,6 @@ require (
 	github.com/acobaugh/osrelease v0.1.0 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
-	github.com/anchore/clio v0.1.1 // indirect
 	github.com/anchore/fangs v0.1.1 // indirect
 	github.com/anchore/go-collections v0.1.1 // indirect
 	github.com/anchore/go-homedir v0.1.1 // indirect
