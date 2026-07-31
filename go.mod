@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	chainguard.dev/go-grpc-kit v0.18.0
-	chainguard.dev/sdk v0.1.157
+	chainguard.dev/sdk v0.1.159
 	github.com/anchore/clio v0.1.1
 	github.com/anchore/grype v0.116.0
 	github.com/anchore/syft v1.48.0
