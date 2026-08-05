@@ -1,0 +1,7 @@
+# Read PR titles for the semantic-PR-title lint workflow.
+issuer: https://token.actions.githubusercontent.com
+subject_pattern: repo:chainguard-sandbox/renovate-datasource:pull_request
+claim_pattern:
+  job_workflow_ref: chainguard-sandbox/renovate-datasource/.github/workflows/lint-pr-title.yaml@refs/heads/main
+permissions:
+  pull_requests: read
