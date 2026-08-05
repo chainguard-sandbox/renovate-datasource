@@ -28,6 +28,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          token: ${{ steps.octo-sts.outputs.token }}
           persist-credentials: false
           # Full history + tags at clone time so subsequent steps don't
           # need to re-fetch (which would fail on a private repo since
