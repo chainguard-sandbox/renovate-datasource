@@ -6,7 +6,7 @@ require (
 	chainguard.dev/go-grpc-kit v0.18.0
 	chainguard.dev/sdk v0.1.159
 	github.com/anchore/clio v0.1.1
-	github.com/anchore/grype v0.116.0
+	github.com/anchore/grype v0.116.1
 	github.com/anchore/syft v1.50.0
 	github.com/google/go-containerregistry v0.21.7
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
