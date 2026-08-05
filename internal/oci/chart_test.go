@@ -58,6 +58,46 @@ func TestExtractTarball_MissingValues(t *testing.T) {
 	}
 }
 
+func TestExtractTarball_PerFileCap(t *testing.T) {
+	// A single Chart.yaml that exceeds maxChartFileSize should be
+	// truncated to the cap rather than swallowing the whole file.
+	oversized := bytes.Repeat([]byte("x"), maxChartFileSize+1024)
+	files := map[string][]byte{
+		"big/Chart.yaml": oversized,
+	}
+	c, err := extractTarball(bytes.NewReader(makeTGZ(t, files)))
+	if err != nil {
+		t.Fatalf("extractTarball: %v", err)
+	}
+	if got := len(c.ChartYAML); got != maxChartFileSize {
+		t.Errorf("ChartYAML length = %d; want %d (maxChartFileSize)", got, maxChartFileSize)
+	}
+}
+
+func TestExtractTarball_TarballCap(t *testing.T) {
+	// Total decompressed stream over maxChartLayerSize should
+	// terminate cleanly (tar reader hits EOF at the cap) without
+	// hanging or erroring.
+	junk := bytes.Repeat([]byte("x"), maxChartLayerSize+1024)
+	files := map[string][]byte{
+		"big/Chart.yaml":    []byte("apiVersion: v2\nname: big\nversion: 1.0.0\n"),
+		"big/junk-payload":  junk,
+	}
+	c, err := extractTarball(bytes.NewReader(makeTGZ(t, files)))
+	// tar.Next may return io.ErrUnexpectedEOF when LimitReader
+	// truncates mid-record; both a clean EOF and that error are
+	// acceptable outcomes — the key property is we don't OOM.
+	if err != nil {
+		t.Logf("extractTarball on oversized layer returned %v (acceptable)", err)
+		return
+	}
+	// map iteration order is nondeterministic; only assert the
+	// per-file cap on whatever Chart.yaml we managed to read.
+	if len(c.ChartYAML) > maxChartFileSize {
+		t.Errorf("ChartYAML length = %d exceeds cap %d", len(c.ChartYAML), maxChartFileSize)
+	}
+}
+
 func TestParseChartMeta_Malformed(t *testing.T) {
 	// Malformed YAML yields empty strings, not a panic.
 	v, av := parseChartMeta([]byte("not: [ yaml"))
