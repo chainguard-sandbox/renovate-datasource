@@ -5,7 +5,7 @@ import (
 )
 
 // APKVersionResponse is the JSON shape returned by /v1/apk/{name}/version
-// — a single-version snapshot of the same pieces ComputeAPKDiff would
+// — a single-version snapshot of the same pieces APKs would
 // surface, but without comparison. Fields are populated independently;
 // any may be empty when the underlying apk doesn't carry that entry.
 type APKVersionResponse struct {

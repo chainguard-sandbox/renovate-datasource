@@ -10,6 +10,7 @@ import (
 
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/oci"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/diff"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/grype"
 )
@@ -17,6 +18,11 @@ import (
 // Conservative repo-name pattern: lowercase, digits, dashes, underscores,
 // dots, and single internal slashes. Blocks `..`, leading dots, query strings.
 var repoNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*$`)
+
+// chartNamePattern is repoNamePattern restricted to a single segment.
+// Chart URLs carry only the chart's short name; the subrepo prefix
+// (charts/ or iamguarded-charts/) is composed server-side.
+var chartNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
 
 // tagPattern matches the OCI distribution tag spec: 1–128 chars from
 // [A-Za-z0-9_.-], starting with [A-Za-z0-9_] (no leading dot or dash).
@@ -102,6 +108,7 @@ type Server struct {
 	fetcher            diff.Fetcher
 	apk                diff.APKFetcher
 	apkIndex           *apk.IndexStore
+	chart              *oci.Fetcher
 	grype              *grype.DB
 	cooldown           time.Duration
 	historyConcurrency int
@@ -128,6 +135,7 @@ func New(backend Backend, fetcher diff.Fetcher, opts ...Option) *Server {
 		fetcher:            fetcher,
 		apk:                o.apk,
 		apkIndex:           o.apkIndex,
+		chart:              o.chart,
 		grype:              o.grype,
 		cooldown:           o.cooldown,
 		historyConcurrency: o.historyConcurrency,
@@ -156,6 +164,12 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /v1/repo/{path...}", s.handleRepoV1)
+	mux.HandleFunc("GET /v1/charts/{name}/releases", s.handleChartReleases)
+	mux.HandleFunc("GET /v1/iamguarded-charts/{name}/releases", s.handleIamguardedChartReleases)
+	mux.HandleFunc("GET /v1/charts/{name}/diff/{from}/{to}", s.handleChartDiff)
+	mux.HandleFunc("GET /v1/iamguarded-charts/{name}/diff/{from}/{to}", s.handleIamguardedChartDiff)
+	mux.HandleFunc("GET /charts/{name}/diff/{oldRef}/{newRef}", s.handleChartDiffPage)
+	mux.HandleFunc("GET /iamguarded-charts/{name}/diff/{oldRef}/{newRef}", s.handleIamguardedChartDiffPage)
 	mux.HandleFunc("GET /v1/apk/{name}/releases", s.handleAPKReleases)
 	mux.HandleFunc("GET /v1/apk/{fromName}/version/{fromVersion}/diff/{toName}/version/{toVersion}", s.handleAPKDiff)
 	mux.HandleFunc("GET /v1/apk/{name}/version/{version}", s.handleAPKVersion)

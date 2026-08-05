@@ -86,47 +86,43 @@ func (f *Fetcher) Config(ctx context.Context, repo, ref string) (*v1.ConfigFile,
 	return cf, nil
 }
 
-// SBOMAndApkoConfig fetches the attestation set for repo @ ref and decodes
-// both the SPDX SBOM and the apko image-configuration predicate in a single
-// pass, so the underlying signature list is fetched from cgr.dev only once
-// (vs the previous "one call per attestation type" shape). Returns ErrNoSBOM
-// if the image has no SPDX attestation. A nil apko byte slice signals
-// "no apko image-configuration attestation" — not an error, since older or
-// non-apko-built images legitimately don't carry one.
+// Statement is a decoded in-toto statement from an attestation.
+type Statement struct {
+	Type          string
+	PredicateType string
+	Predicate     json.RawMessage
+}
+
+// AttestationStatements fetches every attestation attached to repo @
+// ref, DSSE-unwraps each, and returns the in-toto statements.
+// Payloads that aren't DSSE-wrapped in-toto are silently skipped.
 //
-// ref must be a per-platform digest ("sha256:..."); call ResolveDigest first
-// to obtain one from a tag. Passing a tag would let cosign descend into the
-// index manifest and pick up the index-level signature set rather than the
-// per-arch attestations Chainguard publishes.
-func (f *Fetcher) SBOMAndApkoConfig(ctx context.Context, repo, ref string) (*spdx.Document, []byte, error) {
+// ref must be a per-platform digest ("sha256:..."); call ResolveDigest
+// first to obtain one from a tag. A tag would let cosign descend into
+// the index manifest and pick up index-level signatures rather than
+// the per-arch attestations Chainguard publishes.
+func (f *Fetcher) AttestationStatements(ctx context.Context, repo, ref string) ([]Statement, error) {
 	r, err := f.refFor(repo, ref)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	se, err := cosignremote.SignedEntity(r, cosignremote.WithRemoteOptions(f.remoteOpts(ctx)...))
 	if err != nil {
-		return nil, nil, fmt.Errorf("SignedEntity %s: %w", r, err)
+		return nil, fmt.Errorf("SignedEntity %s: %w", r, err)
 	}
 	atts, err := se.Attestations()
 	if err != nil {
-		return nil, nil, fmt.Errorf("attestations %s: %w", r, err)
+		return nil, fmt.Errorf("attestations %s: %w", r, err)
 	}
 	sigs, err := atts.Get()
 	if err != nil {
-		return nil, nil, fmt.Errorf("getting attestations %s: %w", r, err)
+		return nil, fmt.Errorf("getting attestations %s: %w", r, err)
 	}
 
-	// Attestation payload fetches are independent; parallelise them.
-	// Each goroutine pulls its payload once and tries both decoders,
-	// avoiding a second round of Payload() calls per signature.
-	//
-	// egCtx lets a failure or cancelled caller short-circuit remaining
-	// goroutines before they start their Payload fetch. cosign's
-	// oci.Signature.Payload doesn't accept a context itself, so the
-	// cancellation only takes effect at goroutine entry.
-	docs := make([]*spdx.Document, len(sigs))
-	apkos := make([]json.RawMessage, len(sigs))
+	// cosign's oci.Signature.Payload has no context, so cancellation
+	// takes effect only at goroutine entry.
+	slots := make([]*Statement, len(sigs))
 	eg, egCtx := errgroup.WithContext(ctx)
 	for i, sig := range sigs {
 		eg.Go(func() error {
@@ -141,38 +137,50 @@ func (f *Fetcher) SBOMAndApkoConfig(ctx context.Context, repo, ref string) (*spd
 			if !ok {
 				return nil
 			}
-			switch {
-			case strings.HasPrefix(stmt.PredicateType, "https://spdx.dev/"):
-				var doc spdx.Document
-				if err := json.Unmarshal(stmt.Predicate, &doc); err != nil {
-					return fmt.Errorf("parsing SPDX predicate: %w", err)
-				}
-				docs[i] = &doc
-			case stmt.PredicateType == ApkoConfigPredicateType:
-				apkos[i] = stmt.Predicate
-			}
+			slots[i] = &stmt
 			return nil
 		})
 	}
 	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	out := make([]Statement, 0, len(slots))
+	for _, s := range slots {
+		if s != nil {
+			out = append(out, *s)
+		}
+	}
+	return out, nil
+}
+
+// SBOMAndApkoConfig returns the SPDX SBOM and apko image-configuration
+// predicate from repo @ ref's attestations. Returns ErrNoSBOM if no
+// SPDX attestation is present. A nil apko byte slice means the image
+// has no apko attestation — legitimate for older or non-apko-built
+// images.
+func (f *Fetcher) SBOMAndApkoConfig(ctx context.Context, repo, ref string) (*spdx.Document, []byte, error) {
+	stmts, err := f.AttestationStatements(ctx, repo, ref)
+	if err != nil {
 		return nil, nil, err
 	}
 
 	var doc *spdx.Document
-	for _, d := range docs {
-		if d != nil {
-			doc = d
-			break
-		}
-	}
 	var apko json.RawMessage
-	for _, p := range apkos {
-		if p != nil {
-			apko = p
-			break
+	for _, s := range stmts {
+		switch {
+		case doc == nil && strings.HasPrefix(s.PredicateType, "https://spdx.dev/"):
+			var d spdx.Document
+			if err := json.Unmarshal(s.Predicate, &d); err != nil {
+				return nil, nil, fmt.Errorf("parsing SPDX predicate: %w", err)
+			}
+			doc = &d
+		case apko == nil && s.PredicateType == ApkoConfigPredicateType:
+			apko = s.Predicate
 		}
 	}
 	if doc == nil {
+		r, _ := f.refFor(repo, ref)
 		return nil, nil, fmt.Errorf("%w for %s", ErrNoSBOM, r)
 	}
 	return doc, apko, nil
@@ -195,34 +203,29 @@ func (f *Fetcher) remoteOpts(ctx context.Context) []remote.Option {
 
 // --- attestation decoding ---
 
-// decodeInTotoStatement unwraps a cosign attestation's DSSE envelope and
-// returns the enclosed in-toto statement. Returns ok=false for any payload
-// that isn't a DSSE-wrapped JSON in-toto statement — not every attestation
-// on a Chainguard image matches that shape, so callers should treat "not
-// ok" as "skip this signature" rather than an error.
-func decodeInTotoStatement(payload []byte) (intotoStatement, bool) {
-	var env dsseEnvelope
+// decodeInTotoStatement unwraps a cosign attestation's DSSE envelope
+// and returns the in-toto statement inside. ok=false for any payload
+// that isn't a DSSE-wrapped JSON in-toto statement — callers should
+// treat that as "skip this signature" rather than an error.
+func decodeInTotoStatement(payload []byte) (Statement, bool) {
+	var env struct {
+		PayloadType string `json:"payloadType"`
+		Payload     string `json:"payload"`
+	}
 	if err := json.Unmarshal(payload, &env); err != nil {
-		return intotoStatement{}, false
+		return Statement{}, false
 	}
 	rawStmt, err := base64.StdEncoding.DecodeString(env.Payload)
 	if err != nil {
-		return intotoStatement{}, false
+		return Statement{}, false
 	}
-	var stmt intotoStatement
+	var stmt struct {
+		Type          string          `json:"_type"`
+		PredicateType string          `json:"predicateType"`
+		Predicate     json.RawMessage `json:"predicate"`
+	}
 	if err := json.Unmarshal(rawStmt, &stmt); err != nil {
-		return intotoStatement{}, false
+		return Statement{}, false
 	}
-	return stmt, true
-}
-
-type dsseEnvelope struct {
-	PayloadType string `json:"payloadType"`
-	Payload     string `json:"payload"`
-}
-
-type intotoStatement struct {
-	Type          string          `json:"_type"`
-	PredicateType string          `json:"predicateType"`
-	Predicate     json.RawMessage `json:"predicate"`
+	return Statement{Type: stmt.Type, PredicateType: stmt.PredicateType, Predicate: stmt.Predicate}, true
 }

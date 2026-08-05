@@ -1,20 +1,14 @@
 package diff
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/pmezard/go-difflib/difflib"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/diffutil"
 )
-
-// diffContext matches GNU diff -u: three lines of unchanged context
-// before and after each hunk.
-const diffContext = 3
 
 // APKDiffResponse is the JSON shape returned by the apk diff endpoint.
 // The text diff fields are unified-diff strings between the from and to
@@ -67,20 +61,20 @@ type SourceChanges struct {
 }
 
 // APKFetcher loads the contents of an apk by name and version. One call
-// is expected to return everything ComputeAPKDiff needs so we don't
+// is expected to return everything APKs needs so we don't
 // re-download the apk for each diff section.
 type APKFetcher interface {
 	Fetch(ctx context.Context, name, version string) (*apk.Contents, error)
 }
 
-// ComputeAPKDiff fetches both apks' contents in parallel and returns a
-// unified diff of .melange.yaml and .PKGINFO plus a structured diff of
-// the source-pipeline entries (git-checkouts and fetches). from.Name
+// APKs fetches both apks' contents in parallel and returns a unified
+// diff of .melange.yaml and .PKGINFO plus a structured diff of the
+// source-pipeline entries (git-checkouts and fetches). from.Name
 // and to.Name may differ — that's how the chooser page's cross-package
 // diff (e.g. nodejs-22 → nodejs-26) plumbs through. Errors from either
 // fetch are surfaced verbatim so the HTTP layer can map them to
 // appropriate status codes (e.g. apk.ErrNotFound → 404).
-func ComputeAPKDiff(ctx context.Context, f APKFetcher, from, to apk.PackageVersion) (*APKDiffResponse, error) {
+func APKs(ctx context.Context, f APKFetcher, from, to apk.PackageVersion) (*APKDiffResponse, error) {
 	var fromC, toC *apk.Contents
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
@@ -149,14 +143,14 @@ func ComputeAPKDiff(ctx context.Context, f APKFetcher, from, to apk.PackageVersi
 	// otherwise leave Melange empty and let the UI render the missing-
 	// side notice via FromMelangeMissing / ToMelangeMissing.
 	if len(fromC.Melange) > 0 && len(toC.Melange) > 0 {
-		melangeDiff, err := unifiedDiff(melangeLabel, fromLabel, toLabel, fromC.Melange, toC.Melange)
+		melangeDiff, err := diffutil.Unified(melangeLabel, fromLabel, toLabel, fromC.Melange, toC.Melange)
 		if err != nil {
 			return nil, err
 		}
 		resp.Melange = melangeDiff
 	}
 
-	pkginfoDiff, err := unifiedDiff(pkginfoLabel, fromLabel, toLabel, fromC.PKGINFO, toC.PKGINFO)
+	pkginfoDiff, err := diffutil.Unified(pkginfoLabel, fromLabel, toLabel, fromC.PKGINFO, toC.PKGINFO)
 	if err != nil {
 		return nil, err
 	}
@@ -182,37 +176,3 @@ func diffSourcePipelines(fromYAML, toYAML []byte) *SourceChanges {
 	return &SourceChanges{GitCheckouts: git, Fetches: fetch}
 }
 
-// unifiedDiff returns a unified diff of from/to. Both empty inputs → "".
-// Identical inputs → "". Otherwise → standard `diff -u` output with the
-// supplied label embedded in the FromFile/ToFile headers.
-func unifiedDiff(label, fromVer, toVer string, from, to []byte) (string, error) {
-	if bytes.Equal(from, to) {
-		return "", nil
-	}
-	out, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
-		A:        splitLines(string(from)),
-		B:        splitLines(string(to)),
-		FromFile: label + " " + fromVer,
-		ToFile:   label + " " + toVer,
-		Context:  diffContext,
-	})
-	if err != nil {
-		return "", fmt.Errorf("rendering unified diff for %s: %w", label, err)
-	}
-	return out, nil
-}
-
-// splitLines preserves trailing newlines per line so the unified-diff
-// output stays consistent with what `diff -u` produces. strings.Split on
-// "\n" would drop them and produce a degenerate "\ No newline at end of
-// file" marker on every hunk.
-func splitLines(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.SplitAfter(s, "\n")
-	if last := len(parts) - 1; last >= 0 && parts[last] == "" {
-		parts = parts[:last]
-	}
-	return parts
-}

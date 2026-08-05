@@ -37,7 +37,7 @@ func (f *fakeAPKFetcher) Fetch(_ context.Context, name, version string) (*apk.Co
 	return nil, errors.New("not configured")
 }
 
-func TestComputeAPKDiff(t *testing.T) {
+func TestAPKs(t *testing.T) {
 	f := &fakeAPKFetcher{
 		contents: map[string]*apk.Contents{
 			"foo/1.0": {
@@ -60,7 +60,7 @@ func TestComputeAPKDiff(t *testing.T) {
 	}
 
 	t.Run("metadata diffs populate when sides differ", func(t *testing.T) {
-		got, err := ComputeAPKDiff(context.Background(), f, pv("foo", "1.0"), pv("foo", "2.0"))
+		got, err := APKs(context.Background(), f, pv("foo", "1.0"), pv("foo", "2.0"))
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -76,7 +76,7 @@ func TestComputeAPKDiff(t *testing.T) {
 	})
 
 	t.Run("identical contents yield empty diffs", func(t *testing.T) {
-		got, err := ComputeAPKDiff(context.Background(), f, pv("bar", "1.0"), pv("bar", "1.1"))
+		got, err := APKs(context.Background(), f, pv("bar", "1.0"), pv("bar", "1.1"))
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -86,7 +86,7 @@ func TestComputeAPKDiff(t *testing.T) {
 	})
 
 	t.Run("fetch failure surfaces an error", func(t *testing.T) {
-		_, err := ComputeAPKDiff(context.Background(), f, pv("missing", "1.0"), pv("missing", "2.0"))
+		_, err := APKs(context.Background(), f, pv("missing", "1.0"), pv("missing", "2.0"))
 		if err == nil {
 			t.Fatal("expected error for missing entries")
 		}
@@ -105,7 +105,7 @@ func TestComputeAPKDiff(t *testing.T) {
 				},
 			},
 		}
-		got, err := ComputeAPKDiff(context.Background(), crossFetcher, pv("nodejs-22", "22.14.0-r0"), pv("nodejs-26", "26.4.0-r1"))
+		got, err := APKs(context.Background(), crossFetcher, pv("nodejs-22", "22.14.0-r0"), pv("nodejs-26", "26.4.0-r1"))
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -123,27 +123,3 @@ func TestComputeAPKDiff(t *testing.T) {
 	})
 }
 
-func TestSplitLinesPreservesNewlines(t *testing.T) {
-	tests := []struct {
-		in   string
-		want []string
-	}{
-		{"", nil},
-		{"a\n", []string{"a\n"}},
-		{"a\nb\n", []string{"a\n", "b\n"}},
-		{"a\nb", []string{"a\n", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.in, func(t *testing.T) {
-			got := splitLines(tc.in)
-			if len(got) != len(tc.want) {
-				t.Fatalf("len = %d, want %d (got=%q)", len(got), len(tc.want), got)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("[%d] = %q, want %q", i, got[i], tc.want[i])
-				}
-			}
-		})
-	}
-}

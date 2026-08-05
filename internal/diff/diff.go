@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/diffutil"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/grype"
 )
 
@@ -139,7 +140,7 @@ type Fetcher interface {
 // Ref.MainPackage.
 const mainPackageLabel = "dev.chainguard.package.main"
 
-// Compute drives the OCI calls and builds the response.
+// Images drives the OCI calls and builds the response.
 //
 // The from-side and to-side fetches run concurrently via errgroup. Within
 // each side we ResolveDigest first so both downstream calls share the
@@ -152,8 +153,8 @@ const mainPackageLabel = "dev.chainguard.package.main"
 //
 // grypeScanner is optional: nil, or grype.ErrDBNotLoaded from the
 // scanner, omits the Vulnerabilities section but keeps the rest of
-// the diff. Any other scan error fails the whole Compute call.
-func Compute(ctx context.Context, f Fetcher, grypeScanner GrypeScanner, repo, fromRef, toRef string) (*Response, error) {
+// the diff. Any other scan error fails the whole Images call.
+func Images(ctx context.Context, f Fetcher, grypeScanner GrypeScanner, repo, fromRef, toRef string) (*Response, error) {
 	var from, to imageDetails
 
 	fetchImageDetails := func(ctx context.Context, ref, label string, out *imageDetails) error {
@@ -297,7 +298,7 @@ func diffApkoConfig(fromDigest, toDigest string, fromJSON, toJSON []byte) (strin
 	if err != nil {
 		return "", fmt.Errorf("to: %w", err)
 	}
-	return unifiedDiff("apko image-configuration", fromDigest, toDigest, fromYAML, toYAML)
+	return diffutil.Unified("apko image-configuration", fromDigest, toDigest, fromYAML, toYAML)
 }
 
 // jsonToYAML unmarshals JSON into a generic Go value and re-marshals

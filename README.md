@@ -4,9 +4,9 @@
 > This project is developed by the Chainguard Professional Services team and maintenance is provided on a best-effort basis.
 
 A [Renovate custom datasource](https://docs.renovatebot.com/modules/datasource/custom/)
-for Chainguard images and APK packages.
+for Chainguard images, APK packages and Helm charts.
 
-It implements two features for both images and packages:
+It implements two features for each artifact type:
 
 1. An optional cooldown that only surfaces updates at least *N*
    time in the past.
@@ -36,6 +36,13 @@ It implements two features for both images and packages:
       <sub>APK diff</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="images/helm-diff.webp"><img src="images/helm-diff.webp" width="280" alt="Helm chart diff"></a><br>
+      <sub>Helm chart diff</sub>
+    </td>
+    <td align="center" width="50%"></td>
+  </tr>
 </table>
 
 ## Configuring Renovate
@@ -43,8 +50,12 @@ It implements two features for both images and packages:
 Refer to these pages for examples of configuring Renovate to use the datasource
 in different scenarios:
 
-- [Updating Images in Dockerfiles](docs/dockerfile-repo.md)
-- [Updating APK Package Versions in Dockerfiles](docs/dockerfile-apk.md)
+- [Updating Images in Dockerfiles](docs/repo-dockerfile.md)
+- [Updating APK Package Versions in Dockerfiles](docs/apk-dockerfile.md)
+- [Updating Helm Charts in ArgoCD Applications](docs/helm-argocd.md)
+- [Updating Helm Charts as Chart.yaml Dependencies](docs/helm-dependency.md)
+- [Updating Helm Charts in Flux](docs/helm-flux.md)
+- [Updating Helm Charts in Helmfiles](docs/helm-helmfile.md)
 
 ## Build
 
@@ -186,6 +197,13 @@ This supports provides and prefixed capabilities as well:
    (`nodejs-26`, `nodejs-25` etc)
 2. And `cmd:gcloud`, which will return versions for `google-cloud-sdk`.
 
+#### Helm Charts
+
+Chainguard Helm charts are OCI artifacts under
+`cgr.dev/<org>/charts/<name>` and `cgr.dev/<org>/iamguarded-charts/<name>`.
+The datasource serves their tags via `/v1/charts/{name}/releases` and
+`/v1/iamguarded-charts/{name}/releases`, using the same tag-history rewind
+that the image endpoint uses.
 
 ### Changelogs
 
@@ -205,3 +223,13 @@ The datasource hosts a site at
 `/apk/{fromName}/version/{fromVer}/diff/{toName}/version/{toVer}` that
 extracts and compares the `.melange.yaml` and `.PKGINFO` files from the
 control-section of the APK packages.
+
+#### Helm Charts
+
+The datasource hosts a site at `/charts/{chart}/diff/{fromRef}/{toRef}`
+for regular Chainguard charts, and
+`/iamguarded-charts/{chart}/diff/{fromRef}/{toRef}` for iamguarded
+charts.
+
+Both pages compare the images that have been added, updated or removed from the
+chart, as well as differences in the **Chart.yaml** and **values.yaml**.

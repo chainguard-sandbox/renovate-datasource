@@ -64,16 +64,23 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	resp, err := diff.Compute(ctx, s.fetcher, s.grype, repo, from, to)
+	// Convert a nil *grype.DB to an interface-nil so diff.Images's
+	// != nil guard fires. A typed nil wrapped in the GrypeScanner
+	// interface would slip past it and panic on the first method call.
+	var scanner diff.GrypeScanner
+	if s.grype != nil {
+		scanner = s.grype
+	}
+	resp, err := diff.Images(ctx, s.fetcher, scanner, repo, from, to)
 	if err != nil {
 		status, msg := classifyDiffError(err)
 		// 5xx errors deserve an ERROR log line — the server is the source
 		// of the problem (or its upstream). 4xx are client problems; we
 		// log them at Info so they don't pollute the error stream.
 		if status >= 500 {
-			s.log.ErrorContext(ctx, "diff.Compute failed", "repo", repo, "from", from, "to", to, "err", err)
+			s.log.ErrorContext(ctx, "diff.Images failed", "repo", repo, "from", from, "to", to, "err", err)
 		} else {
-			s.log.InfoContext(ctx, "diff.Compute client error", "repo", repo, "from", from, "to", to, "status", status, "err", err)
+			s.log.InfoContext(ctx, "diff.Images client error", "repo", repo, "from", from, "to", to, "status", status, "err", err)
 		}
 		writeAPIError(w, status, msg)
 		return
@@ -85,7 +92,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// classifyDiffError maps an error from diff.Compute into the HTTP status and
+// classifyDiffError maps an error from diff.Images into the HTTP status and
 // client-facing message we want to return. The two interesting cases are:
 //
 //   - the registry told us the image/tag doesn't exist (transport.Error 404)

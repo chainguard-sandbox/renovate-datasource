@@ -170,6 +170,7 @@ func run(parent context.Context, opts *options) error {
 		server.WithOrgName(cg.OrgName),
 		server.WithAPKFetcher(apkFetcher),
 		server.WithAPKIndex(apkStore),
+		server.WithChartFetcher(fetcher),
 	}
 	if grypeStore != nil {
 		serverOpts = append(serverOpts, server.WithGrypeScanner(grypeStore))

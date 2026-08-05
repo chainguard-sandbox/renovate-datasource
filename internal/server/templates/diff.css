@@ -410,3 +410,36 @@ pre.diff, pre.raw {
   margin-bottom: .5em;
 }
 .source-card-title h3 { margin: 0; }
+
+/* Chart image bucket rows. Same added/removed/updated shape as
+   packages; two-line layout with the logical name and metadata on top
+   and the concrete ref (or from→to) on the second line. */
+.chart-image-header {
+  display: flex;
+  align-items: baseline;
+  gap: .4em;
+  flex-wrap: wrap;
+}
+.chart-image-body {
+  font-size: .9em;
+  padding-left: 1.1em;
+  margin-top: .15em;
+}
+.chart-subpath {
+  font-size: .8em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 0 .35em;
+  border-radius: 3px;
+  margin-right: .4em;
+}
+.chart-req {
+  font-size: .7em;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 0 .35em;
+  border-radius: 3px;
+  margin-left: .4em;
+}
+.chart-req-required { background: var(--accent-bg); color: var(--accent-dark); border: 1px solid var(--accent-border); }
+.chart-req-optional { background: var(--bg-soft); color: var(--muted); border: 1px solid var(--border); }

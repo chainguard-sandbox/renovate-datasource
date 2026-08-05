@@ -302,7 +302,7 @@ func TestHandleReleasesCooldownQueryParam(t *testing.T) {
 				t.Errorf("ListTagHistory calls = %d, want %d", got, tc.wantHistCalls)
 			}
 			if tc.wantStatus == http.StatusOK {
-				var resp Response
+				var resp ReleasesResponse
 				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 					t.Fatalf("decode: %v", err)
 				}

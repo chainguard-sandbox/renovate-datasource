@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"chainguard.dev/sdk/auth"
 	delegate "chainguard.dev/go-grpc-kit/pkg/options"
@@ -220,10 +221,22 @@ func resolveOrgUIDP(ctx context.Context, iamc iam.Clients, orgName string) (stri
 	}
 }
 
+// resolveRepoUIDP walks the group hierarchy for a slash-separated
+// repoName. Intermediate segments (e.g. "charts" in "charts/foo") are
+// resolved as subgroups; the final segment as the repo.
 func (c *Client) resolveRepoUIDP(ctx context.Context, repoName string) (string, error) {
+	segments := strings.Split(repoName, "/")
+	parent := c.OrgUIDP
+	for _, seg := range segments[:len(segments)-1] {
+		next, err := c.resolveSubgroupUIDP(ctx, parent, seg)
+		if err != nil {
+			return "", err
+		}
+		parent = next
+	}
 	resp, err := c.registry.Registry().ListRepos(ctx, &registry.RepoFilter{
-		Uidp: &common.UIDPFilter{ChildrenOf: c.OrgUIDP},
-		Name: repoName,
+		Uidp: &common.UIDPFilter{ChildrenOf: parent},
+		Name: segments[len(segments)-1],
 	})
 	if err != nil {
 		return "", fmt.Errorf("listing repos: %w", err)
@@ -231,6 +244,21 @@ func (c *Client) resolveRepoUIDP(ctx context.Context, repoName string) (string, 
 	items := resp.GetItems()
 	if len(items) == 0 {
 		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, repoName)
+	}
+	return items[0].GetId(), nil
+}
+
+func (c *Client) resolveSubgroupUIDP(ctx context.Context, parentUIDP, name string) (string, error) {
+	resp, err := c.iam.Groups().List(ctx, &iam.GroupFilter{
+		Uidp: &common.UIDPFilter{ChildrenOf: parentUIDP},
+		Name: name,
+	})
+	if err != nil {
+		return "", fmt.Errorf("listing subgroups: %w", err)
+	}
+	items := resp.GetItems()
+	if len(items) == 0 {
+		return "", fmt.Errorf("%w: subgroup %s not found under %s", ErrRepoNotFound, name, parentUIDP)
 	}
 	return items[0].GetId(), nil
 }

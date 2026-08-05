@@ -91,13 +91,13 @@ func (s *Server) handleAPKDiff(w http.ResponseWriter, r *http.Request) {
 // responsible for input validation and provider resolution.
 func (s *Server) serveAPKDiffJSON(w http.ResponseWriter, r *http.Request, from, to apk.PackageVersion) {
 	ctx := r.Context()
-	resp, err := diff.ComputeAPKDiff(ctx, s.apk, from, to)
+	resp, err := diff.APKs(ctx, s.apk, from, to)
 	if err != nil {
 		status, msg := classifyAPKDiffError(err)
 		if status >= 500 {
-			s.log.ErrorContext(ctx, "ComputeAPKDiff failed", "fromName", from.Name, "from", from.Version, "toName", to.Name, "to", to.Version, "err", err)
+			s.log.ErrorContext(ctx, "diff.APKs failed", "fromName", from.Name, "from", from.Version, "toName", to.Name, "to", to.Version, "err", err)
 		} else {
-			s.log.InfoContext(ctx, "ComputeAPKDiff client error", "fromName", from.Name, "from", from.Version, "toName", to.Name, "to", to.Version, "status", status, "err", err)
+			s.log.InfoContext(ctx, "diff.APKs client error", "fromName", from.Name, "from", from.Version, "toName", to.Name, "to", to.Version, "status", status, "err", err)
 		}
 		writeAPIError(w, status, msg)
 		return

@@ -7,6 +7,7 @@ import (
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/diff"
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/grype"
+	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/oci"
 )
 
 const (
@@ -20,6 +21,7 @@ type options struct {
 	orgName            string
 	apk                diff.APKFetcher
 	apkIndex           *apk.IndexStore
+	chart              *oci.Fetcher
 	grype              *grype.DB
 	log                *slog.Logger
 	now                func() time.Time
@@ -72,4 +74,10 @@ func WithAPKIndex(s *apk.IndexStore) Option {
 // image diff page. Unset omits the Vulnerabilities section.
 func WithGrypeScanner(s *grype.DB) Option {
 	return func(o *options) { o.grype = s }
+}
+
+// WithChartFetcher attaches the fetcher used by the chart diff
+// endpoints. Unset returns 501 from those endpoints.
+func WithChartFetcher(f *oci.Fetcher) Option {
+	return func(o *options) { o.chart = f }
 }
