@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -158,9 +159,31 @@ func NewIndexLoader(store *IndexStore, arch string, repos []Repository, log *slo
 	return &IndexLoader{
 		repos:  repos,
 		arch:   arch,
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: newIndexHTTPClient(),
 		store:  store,
 		log:    log,
+	}
+}
+
+// newIndexHTTPClient mirrors the bounded transport in apk.go's
+// newHTTPClient but with longer timeouts sized for 10-20 MiB index
+// downloads. Without the explicit transport, a slow TLS peer could
+// hang initial load past the 60s client timeout.
+func newIndexHTTPClient() *http.Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+		MaxIdleConnsPerHost:   4,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   60 * time.Second,
 	}
 }
 
