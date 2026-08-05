@@ -160,6 +160,15 @@ func (s *Server) Handler() http.Handler {
 			writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
 			return
 		}
+		// When the apk index is wired up but the initial load failed,
+		// /v1/apk/{name}/releases will 404 until the next refresh
+		// succeeds — surface that as not-ready so orchestrators can
+		// gate traffic.
+		if s.apkIndex != nil && s.apkIndex.Len() == 0 {
+			s.log.WarnContext(r.Context(), "not ready", "err", "apk index empty")
+			writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
