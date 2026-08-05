@@ -68,11 +68,19 @@ function fetchJSON(url, render) {
     .catch(showError);
 }
 
+// isSafeHTTPURL keeps only http(s) references; everything else is
+// dropped rather than escaped. Defense in depth for any caller that
+// forwards a URL from the network into an href.
+function isSafeHTTPURL(u) {
+  return typeof u === "string" && /^https?:\/\//i.test(u);
+}
+
 // linked emits an external hyperlink with the ↗ external-link
-// indicator. Pass an empty/missing url to fall back to plain escaped
-// text — useful when the backend couldn't resolve a safe URL.
+// indicator. Falls back to plain escaped text when the url is empty
+// or isn't a plain http(s) reference — keeps a well-meaning caller
+// from turning a `javascript:` string into an active link.
 function linked(value, url) {
-  if (!url) return esc(value);
+  if (!isSafeHTTPURL(url)) return esc(value);
   return `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(value)}<span class="ext-arrow" aria-hidden="true">↗</span></a>`;
 }
 

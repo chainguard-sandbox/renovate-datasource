@@ -252,11 +252,7 @@ function vulnerabilityLink(v) {
   return `<a class="vuln-id mono" href="${esc(href)}" target="_blank" rel="noopener">${esc(id)}</a>`;
 }
 
-// isSafeHTTPURL keeps only http(s) references; everything else is
-// dropped rather than escaped.
-function isSafeHTTPURL(u) {
-  return typeof u === "string" && /^https?:\/\//i.test(u);
-}
+// isSafeHTTPURL is defined in common.js.
 
 function advisoryURLFor(id) {
   if (id.startsWith("GHSA-")) {
