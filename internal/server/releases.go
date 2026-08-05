@@ -14,6 +14,24 @@ import (
 // given concurrency <= 0.
 const DefaultHistoryConcurrency = 16
 
+// maxCooldown bounds the ?cooldown= override at one year. Beyond
+// that we assume a malformed request rather than intent.
+const maxCooldown = 365 * 24 * time.Hour
+
+// parseCooldownQuery parses the ?cooldown=<dur> override. Returns
+// ok=false with a client-facing error message when the value can't
+// be parsed, is negative, or exceeds maxCooldown.
+func parseCooldownQuery(raw string) (time.Duration, string, bool) {
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0, "The 'cooldown' query parameter must be a non-negative Go duration (e.g. 168h).", false
+	}
+	if d > maxCooldown {
+		return 0, "The 'cooldown' query parameter exceeds the maximum of 8760h (365 days).", false
+	}
+	return d, "", true
+}
+
 // Release is one entry in the Renovate custom-datasource response.
 type Release struct {
 	Version          string    `json:"version"`

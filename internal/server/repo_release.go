@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
 )
@@ -21,9 +20,9 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 	// multiple Renovate configurations that each want a different window.
 	cooldown := s.cooldown
 	if raw := r.URL.Query().Get("cooldown"); raw != "" {
-		d, err := time.ParseDuration(raw)
-		if err != nil || d < 0 {
-			writeAPIError(w, http.StatusBadRequest, "The 'cooldown' query parameter must be a non-negative Go duration (e.g. 168h).")
+		d, msg, ok := parseCooldownQuery(raw)
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, msg)
 			return
 		}
 		cooldown = d

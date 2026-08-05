@@ -42,9 +42,9 @@ func (s *Server) handleAPKReleases(w http.ResponseWriter, r *http.Request) {
 	// serve multiple Renovate configurations with different windows.
 	cooldown := s.cooldown
 	if raw := r.URL.Query().Get("cooldown"); raw != "" {
-		d, err := time.ParseDuration(raw)
-		if err != nil || d < 0 {
-			writeAPIError(w, http.StatusBadRequest, "The 'cooldown' query parameter must be a non-negative Go duration (e.g. 168h).")
+		d, msg, ok := parseCooldownQuery(raw)
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, msg)
 			return
 		}
 		cooldown = d
