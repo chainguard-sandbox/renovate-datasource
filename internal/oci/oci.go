@@ -121,9 +121,11 @@ func (f *Fetcher) AttestationStatements(ctx context.Context, repo, ref string) (
 	}
 
 	// cosign's oci.Signature.Payload has no context, so cancellation
-	// takes effect only at goroutine entry.
+	// takes effect only at goroutine entry. Cap concurrency to bound
+	// fan-out on a manifest with many attestations.
 	slots := make([]*Statement, len(sigs))
 	eg, egCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(16)
 	for i, sig := range sigs {
 		eg.Go(func() error {
 			if err := egCtx.Err(); err != nil {
