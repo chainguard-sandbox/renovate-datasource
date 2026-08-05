@@ -1,7 +1,9 @@
 # Read PR titles for the semantic-PR-title lint workflow.
+# PR-triggered runs carry job_workflow_ref @refs/pull/<N>/merge,
+# not @refs/heads/main, so match any ref for this workflow file.
 issuer: https://token.actions.githubusercontent.com
 subject_pattern: repo:chainguard-sandbox/renovate-datasource:pull_request
 claim_pattern:
-  job_workflow_ref: chainguard-sandbox/renovate-datasource/.github/workflows/lint-pr-title.yaml@refs/heads/main
+  job_workflow_ref: chainguard-sandbox/renovate-datasource/\.github/workflows/lint-pr-title\.yaml@.*
 permissions:
   pull_requests: read
