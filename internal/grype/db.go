@@ -105,11 +105,21 @@ func (s *DB) reload(ctx context.Context, update bool) error {
 	}
 
 	s.mu.Lock()
+	old := s.provider
 	s.provider = vp
 	if s.matchers == nil {
 		s.matchers = matcher.NewDefaultMatchers(matcher.Config{})
 	}
 	s.mu.Unlock()
+
+	// Close the previous provider outside the lock — it wraps a
+	// SQLite handle and file-backed indexes, so leaking one per
+	// refresh accumulates fds over the life of the process.
+	if old != nil {
+		if err := old.Close(); err != nil {
+			s.log.WarnContext(ctx, "closing previous grype db provider", "err", err)
+		}
+	}
 	return nil
 }
 
