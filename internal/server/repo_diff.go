@@ -105,9 +105,12 @@ func classifyDiffError(err error) (int, string) {
 	var te *transport.Error
 	if errors.As(err, &te) {
 		switch te.StatusCode {
-		case http.StatusNotFound:
+		case http.StatusNotFound, http.StatusForbidden:
+			// Map 403 the same as 404 so the caller can't
+			// distinguish "you're not allowed to see this repo"
+			// from "no such repo".
 			return http.StatusNotFound, "This tag or digest doesn't exist in the registry."
-		case http.StatusUnauthorized, http.StatusForbidden:
+		case http.StatusUnauthorized:
 			return http.StatusBadGateway, "Failed to authenticate with the upstream registry."
 		}
 	}
