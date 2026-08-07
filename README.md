@@ -50,8 +50,11 @@ Run the service locally and reuse the local credentials provided by `chainctl`:
 # Login to Chainguard
 chainctl auth login
 
-# Run the service
+# Run the service, serves both /v1/repo/ and /v1/apk/
 ./renovate-datasource --org=my.org.com
+
+# Use --datasource to only serve one of the datasources (apk or repo)
+./renovate-datasource --org=my.org.com --datasource apk
 ```
 
 The datasource endpoints are then a plain HTTP GET away:

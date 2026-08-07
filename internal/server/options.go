@@ -16,6 +16,8 @@ type options struct {
 	cooldown           time.Duration
 	historyConcurrency int
 	apkIndex           *apk.IndexStore
+	enableRepo         bool
+	enableAPK          bool
 	log                *slog.Logger
 	now                func() time.Time
 }
@@ -47,4 +49,17 @@ func WithLogger(l *slog.Logger) Option {
 // Implemented.
 func WithAPKIndex(s *apk.IndexStore) Option {
 	return func(o *options) { o.apkIndex = s }
+}
+
+// WithRepoEnabled toggles registration of the /v1/repo/{path}/releases
+// route. Default is true. When false the route returns 404.
+func WithRepoEnabled(enabled bool) Option {
+	return func(o *options) { o.enableRepo = enabled }
+}
+
+// WithAPKEnabled toggles registration of the /v1/apk/{name}/releases
+// route. Default is true. When false the route returns 404 (even if
+// WithAPKIndex was passed).
+func WithAPKEnabled(enabled bool) Option {
+	return func(o *options) { o.enableAPK = enabled }
 }

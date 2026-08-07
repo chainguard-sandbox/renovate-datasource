@@ -26,6 +26,7 @@ type options struct {
 	org                string
 	historyConcurrency int
 	apkIndexRefresh    time.Duration
+	datasources        []string
 
 	identity      string
 	identityToken string
@@ -75,6 +76,7 @@ Authentication:
 	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name (required)")
 	cmd.Flags().IntVar(&opts.historyConcurrency, "history-concurrency", 16, "max concurrent ListTagHistory calls per request")
 	cmd.Flags().DurationVar(&opts.apkIndexRefresh, "apk-index-refresh", time.Hour, "how often to re-fetch the apk indexes served under /v1/apk/{name}/releases. 0 disables the background refresh (indexes are still loaded once at startup).")
+	cmd.Flags().StringSliceVar(&opts.datasources, "datasource", []string{"repo", "apk"}, "select which datasources to expose (repo, apk). Repo-only skips the APK index fetch and apk.cgr.dev token exchange at startup.")
 	cmd.Flags().StringVar(&opts.identity, "identity", "", "UIDP of an assumable Chainguard identity (enables identity auth)")
 	cmd.Flags().StringVar(&opts.identityToken, "identity-token", "", "OIDC token to assume the identity; either a file path or a literal JWT")
 	_ = cmd.MarkFlagRequired("org")
@@ -84,6 +86,11 @@ Authentication:
 
 func run(parent context.Context, opts *options) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
+	enableRepo, enableAPK, err := parseDatasources(opts.datasources)
+	if err != nil {
+		return err
+	}
 
 	cgOpts, authLbl, err := chainguardOptions(opts)
 	if err != nil {
@@ -100,25 +107,29 @@ func run(parent context.Context, opts *options) error {
 	}
 	defer cg.Close()
 
-	log.Info("resolved org", "org", opts.org, "uidp", cg.OrgUIDP, "cooldown", opts.cooldown, "auth", authLbl)
-
-	// APK repository chain feeding the /v1/apk/{name}/releases index.
-	const apkArch = "x86_64"
-	apkRepos := apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx))
-
-	// Initial load blocks so /v1/apk/{name}/releases is warm as soon
-	// as the listener comes up; refresh continues in the background
-	// tied to ctx.
-	apkStore, err := apk.NewIndexStoreWithRefresh(ctx, apkArch, apkRepos, opts.apkIndexRefresh, log)
-	if err != nil {
-		log.Warn("initial apk index load failed; /v1/apk/{name}/releases will 404 until the next successful refresh", "err", err)
-	}
+	log.Info("resolved org", "org", opts.org, "uidp", cg.OrgUIDP, "cooldown", opts.cooldown, "auth", authLbl, "datasources", opts.datasources)
 
 	serverOpts := []server.Option{
 		server.WithCooldown(opts.cooldown),
 		server.WithHistoryConcurrency(opts.historyConcurrency),
 		server.WithLogger(log),
-		server.WithAPKIndex(apkStore),
+		server.WithRepoEnabled(enableRepo),
+		server.WithAPKEnabled(enableAPK),
+	}
+
+	if enableAPK {
+		// APK repository chain feeding the /v1/apk/{name}/releases index.
+		const apkArch = "x86_64"
+		apkRepos := apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx))
+
+		// Initial load blocks so /v1/apk/{name}/releases is warm as soon
+		// as the listener comes up; refresh continues in the background
+		// tied to ctx.
+		apkStore, err := apk.NewIndexStoreWithRefresh(ctx, apkArch, apkRepos, opts.apkIndexRefresh, log)
+		if err != nil {
+			log.Warn("initial apk index load failed; /v1/apk/{name}/releases will 404 until the next successful refresh", "err", err)
+		}
+		serverOpts = append(serverOpts, server.WithAPKIndex(apkStore))
 	}
 
 	srv := &http.Server{
@@ -156,6 +167,27 @@ func run(parent context.Context, opts *options) error {
 		return err
 	}
 	return nil
+}
+
+// parseDatasources validates the --datasource list and returns the
+// enable-repo / enable-apk booleans it implies. Empty and unknown values
+// are rejected so a typo doesn't silently disable both endpoints.
+func parseDatasources(values []string) (bool, bool, error) {
+	if len(values) == 0 {
+		return false, false, errors.New("--datasource must list at least one of: repo, apk")
+	}
+	var enableRepo, enableAPK bool
+	for _, v := range values {
+		switch v {
+		case "repo":
+			enableRepo = true
+		case "apk":
+			enableAPK = true
+		default:
+			return false, false, fmt.Errorf("unknown --datasource %q; supported: repo, apk", v)
+		}
+	}
+	return enableRepo, enableAPK, nil
 }
 
 // chainguardOptions translates CLI flags into chainguard.Option values, plus

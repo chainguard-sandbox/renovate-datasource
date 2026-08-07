@@ -48,6 +48,8 @@ type Server struct {
 	apkIndex           *apk.IndexStore
 	cooldown           time.Duration
 	historyConcurrency int
+	enableRepo         bool
+	enableAPK          bool
 	now                func() time.Time
 	log                *slog.Logger
 }
@@ -58,6 +60,8 @@ func New(backend Backend, opts ...Option) *Server {
 	o := options{
 		cooldown:           defaultCooldown,
 		historyConcurrency: defaultHistoryConcurrency,
+		enableRepo:         true,
+		enableAPK:          true,
 		log:                slog.Default(),
 		now:                time.Now,
 	}
@@ -69,6 +73,8 @@ func New(backend Backend, opts ...Option) *Server {
 		apkIndex:           o.apkIndex,
 		cooldown:           o.cooldown,
 		historyConcurrency: o.historyConcurrency,
+		enableRepo:         o.enableRepo,
+		enableAPK:          o.enableAPK,
 		now:                o.now,
 		log:                o.log,
 	}
@@ -101,8 +107,12 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("GET /v1/repo/{path...}", s.handleRepoV1)
-	mux.HandleFunc("GET /v1/apk/{name}/releases", s.handleAPKReleases)
+	if s.enableRepo {
+		mux.HandleFunc("GET /v1/repo/{path...}", s.handleRepoV1)
+	}
+	if s.enableAPK {
+		mux.HandleFunc("GET /v1/apk/{name}/releases", s.handleAPKReleases)
+	}
 	return mux
 }
 

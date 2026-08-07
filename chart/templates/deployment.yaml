@@ -30,6 +30,9 @@ spec:
             {{- with .Values.cooldown }}
             - --cooldown={{ . }}
             {{- end }}
+            {{- with .Values.datasources }}
+            - --datasource={{ join "," . }}
+            {{- end }}
             {{- with .Values.historyConcurrency }}
             - --history-concurrency={{ . }}
             {{- end }}

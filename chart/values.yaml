@@ -20,6 +20,10 @@ image:
 # to disable cooldown; per-request `?cooldown=` still overrides it.
 cooldown: ""
 
+# -- Datasources to expose (--datasource). Empty means both. Set to
+# ["repo"] or ["apk"] to disable the other and skip its startup cost.
+datasources: []
+
 # -- Max concurrent ListTagHistory calls per request (--history-concurrency).
 historyConcurrency: 16
 
