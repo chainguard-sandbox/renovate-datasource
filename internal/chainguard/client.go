@@ -38,36 +38,19 @@ const (
 )
 
 type Client struct {
-	OrgName   string
-	OrgUIDP   string
-	iam       iam.Clients
-	registry  registry.Clients
-	conn      *grpc.ClientConn
-	mode      authMode
+	OrgName  string
+	OrgUIDP  string
+	iam      iam.Clients
+	registry registry.Clients
+	conn     *grpc.ClientConn
+	mode     authMode
 
-	// baseTS is the raw OIDC token source, before any STS exchange. The oci
-	// package consumes this (via BaseTokenSource()) to build its own keychain
-	// that STS-exchanges the same base token into the cgr.dev audience.
+	// baseTS is the raw OIDC token source, before any STS exchange.
+	// APKTokenSource wraps it in an apk.cgr.dev-audience exchange for
+	// the identity path.
 	baseTS    oauth2.TokenSource
 	identity  string // assumable identity UIDP for identity mode; "" for chainctl
 	tokenFile string // path to OIDC token file, if identity-mode + file-based
-}
-
-// IsIdentity reports whether this client was built for assumable-identity
-// auth (as opposed to the local chainctl token). Callers use this to decide
-// which keychain to use for direct cgr.dev access.
-func (c *Client) IsIdentity() bool { return c.mode == authIdentity }
-
-// RegistryTokenSource returns an oauth2.TokenSource that mints cgr.dev-
-// audience tokens via STS exchange using the configured assumable identity.
-//
-// Only valid in identity mode. In chainctl mode we don't shell out to the
-// CLI any more — callers are expected to pick credentials up from the local
-// Docker credential store (set up via `chainctl auth configure-docker` or
-// similar) via go-containerregistry's authn.DefaultKeychain.
-func (c *Client) RegistryTokenSource(ctx context.Context) oauth2.TokenSource {
-	xchg := sts.New(issuer, "cgr.dev", sts.WithIdentity(c.identity))
-	return sts.NewContextTokenSource(ctx, c.baseTS, xchg)
 }
 
 // APKTokenSource returns an oauth2.TokenSource that mints apk.cgr.dev-
@@ -107,9 +90,11 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 		fn(&o)
 	}
 
-	// Per-mode auth setup: figure out the un-exchanged base token source
-	// (used by the OCI keychain to mint cgr.dev-audience tokens) and the
-	// platform-audience token source we'll attach to the gRPC connection.
+	// Per-mode auth setup: build the platform-audience token source
+	// attached to the gRPC connection. In identity mode we also hold on
+	// to the un-exchanged base so APKTokenSource can trade it for an
+	// apk.cgr.dev-audience token; chainctl mode goes through the SDK's
+	// chainctl helper directly instead.
 	var (
 		ts        oauth2.TokenSource
 		baseTS    oauth2.TokenSource
@@ -122,8 +107,7 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 		if _, err := loadChainctlToken(); err != nil {
 			return nil, err
 		}
-		baseTS = &chainctlTokenSource{}
-		ts = oauth2.ReuseTokenSource(nil, baseTS)
+		ts = oauth2.ReuseTokenSource(nil, &chainctlTokenSource{})
 
 	case authIdentity:
 		if o.identity == "" || o.identityToken == "" {

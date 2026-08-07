@@ -1,9 +1,9 @@
 # Updating Chainguard Helm Charts in Helmfiles
 
-Example Renovate configurations that update Chainguard chart references in a
-[`helmfile.yaml`](https://helmfile.readthedocs.io/). 
+Example Renovate configuration that updates Chainguard chart references in
+a [`helmfile.yaml`](https://helmfile.readthedocs.io/).
 
-For instance:
+Sample manifest:
 
 ```yaml
 releases:
@@ -17,73 +17,19 @@ releases:
     namespace: nginx
 ```
 
-## Without Cooldown
-
-If you aren't interested in cooldown, then you only need to use the custom
-changelog URL functionality of the datasource.
-
 The `helmfile` manager in Renovate doesn't presently support updating digests,
-which is a best practice when using Chainguard Helm charts, so we use custom
-managers instead that extract the digest and update them using the built in
-`docker` datasource.
-
-To use this example yourself, replace every instance of `cgr.dev/my-org` with
-your own Chainguard organization name or internal mirror/proxy.
-
-```jsonc
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "packageRules": [
-    {
-      "matchManagers": ["helmfile"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/(charts|iamguarded-charts)/"],
-      "enabled": false
-    },
-    {
-      "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/charts/"],
-      "changelogUrl": "http://<datasource-host>/charts/{{{replace \"cgr.dev/my-org/charts/\" \"\" packageName}}}/diff/{{#if currentDigest}}{{currentDigest}}{{else}}{{currentValue}}{{/if}}/{{#if currentDigest}}{{newDigest}}{{else}}{{newValue}}{{/if}}"
-    },
-    {
-      "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/iamguarded-charts/"],
-      "changelogUrl": "http://<datasource-host>/iamguarded-charts/{{{replace \"cgr.dev/my-org/iamguarded-charts/\" \"\" packageName}}}/diff/{{#if currentDigest}}{{currentDigest}}{{else}}{{currentValue}}{{/if}}/{{#if currentDigest}}{{newDigest}}{{else}}{{newValue}}{{/if}}"
-    }
-  ],
-  "customManagers": [
-    {
-      "customType": "jsonata",
-      "fileFormat": "yaml",
-      "fileMatch": ["(^|/)helmfile\\.ya?ml$"],
-      "matchStrings": [
-        "releases[$contains(chart, 'cgr.dev/my-org/charts/')].($n := $substringAfter($substringBefore(chart & '@', '@'), 'charts/'); $exists(version) ? { 'depName': $n, 'packageName': 'cgr.dev/my-org/charts/' & $n, 'currentValue': version, 'currentDigest': $substringAfter(chart, '@') } : { 'depName': $n, 'packageName': 'cgr.dev/my-org/charts/' & $n, 'currentDigest': $substringAfter(chart, '@') })"
-      ],
-      "datasourceTemplate": "docker"
-    },
-    {
-      "customType": "jsonata",
-      "fileFormat": "yaml",
-      "fileMatch": ["(^|/)helmfile\\.ya?ml$"],
-      "matchStrings": [
-        "releases[$contains(chart, 'cgr.dev/my-org/iamguarded-charts/')].($n := $substringAfter($substringBefore(chart & '@', '@'), 'iamguarded-charts/'); $exists(version) ? { 'depName': $n, 'packageName': 'cgr.dev/my-org/iamguarded-charts/' & $n, 'currentValue': version, 'currentDigest': $substringAfter(chart, '@') } : { 'depName': $n, 'packageName': 'cgr.dev/my-org/iamguarded-charts/' & $n, 'currentDigest': $substringAfter(chart, '@') })"
-      ],
-      "datasourceTemplate": "docker"
-    }
-  ]
-}
-```
-
-## With Cooldown
-
-Use the custom datasource to take advantage of the cooldown functionality.
+which is a best practice when using Chainguard Helm charts, so we disable it
+for Chainguard charts and use custom managers that extract the version and
+digest together.
 
 To use this example:
 
 - Replace `<datasource-host>` with the hostname of the datasource running
   in your environment.
-- Adjust the cooldown window by changing the `cooldown=168h` query parameter.
-- Replace every instance of `cgr.dev/my-org` with your own Chainguard organization
-  name or internal mirror/proxy.
+- Adjust the cooldown window by changing the `cooldown=168h` query parameter,
+  or drop it entirely to disable per-request cooldown.
+- Replace every instance of `cgr.dev/my-org` with your own Chainguard
+  organization name or internal mirror/proxy.
 
 ```jsonc
 {
@@ -105,14 +51,8 @@ To use this example:
       "enabled": false
     },
     {
-      "matchDatasources": ["custom.chainguard-chart"],
-      "versioning": "semver",
-      "changelogUrl": "http://<datasource-host>/charts/{{packageName}}/diff/{{#if currentDigest}}{{currentDigest}}{{else}}{{currentValue}}{{/if}}/{{#if currentDigest}}{{newDigest}}{{else}}{{newValue}}{{/if}}"
-    },
-    {
-      "matchDatasources": ["custom.chainguard-iamguarded-chart"],
-      "versioning": "semver",
-      "changelogUrl": "http://<datasource-host>/iamguarded-charts/{{packageName}}/diff/{{#if currentDigest}}{{currentDigest}}{{else}}{{currentValue}}{{/if}}/{{#if currentDigest}}{{newDigest}}{{else}}{{newValue}}{{/if}}"
+      "matchDatasources": ["custom.chainguard-chart", "custom.chainguard-iamguarded-chart"],
+      "versioning": "semver"
     }
   ],
   "customManagers": [

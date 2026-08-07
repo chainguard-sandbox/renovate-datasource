@@ -7,8 +7,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -80,12 +78,6 @@ func TestParseIndex(t *testing.T) {
 	if got := len(out.releases["bar"]); got != 1 {
 		t.Errorf("bar releases = %d, want 1", got)
 	}
-	// Every P:/V: pair should be flagged as a real (installable) package.
-	for _, key := range []string{"foo=1.2.3-r0", "foo=1.2.4-r0", "bar=0.1.0-r0"} {
-		if _, ok := out.real[key]; !ok {
-			t.Errorf("real set missing %q", key)
-		}
-	}
 }
 
 func TestParseIndex_TrailingRecordWithoutBlankLine(t *testing.T) {
@@ -137,8 +129,6 @@ func TestParseIndex_CapturesProvides(t *testing.T) {
 	// prefixed (cmd:node, so:libnode.so.137, pc:node) provides plus a
 	// nameonly entry. All versioned entries should reach the store; the
 	// nameonly one is dropped since there's nothing to update against.
-	// Every emitted provide should map back to the real package
-	// (nodejs-24 24.14.0-r0) in the reverse index.
 	body := strings.Join([]string{
 		"P:nodejs-24",
 		"V:24.14.0-r0",
@@ -157,16 +147,10 @@ func TestParseIndex_CapturesProvides(t *testing.T) {
 		t.Errorf("nodejs-24 missing: %+v", out.releases["nodejs-24"])
 	}
 	// Every versioned provide — prefixed or not — is captured under its
-	// provided name with the provided version, and points back to the
-	// real package in the reverse index.
-	wantPackageVersion := PackageVersion{Name: "nodejs-24", Version: "24.14.0-r0"}
+	// provided name with the provided version.
 	for _, name := range []string{"nodejs", "nodejs-lts", "cmd:node", "so:libnode.so.137", "pc:node"} {
 		if len(out.releases[name]) != 1 || out.releases[name][0].Version != "24.14.0-r0" {
 			t.Errorf("%s provide missing or wrong: %+v", name, out.releases[name])
-		}
-		got := out.provides[providesKey(name, "24.14.0-r0")]
-		if !reflect.DeepEqual(got, []PackageVersion{wantPackageVersion}) {
-			t.Errorf("provides[%q] = %+v, want [%+v]", name, got, wantPackageVersion)
 		}
 	}
 	// Nameonly provides carry no version to update against.
@@ -223,17 +207,6 @@ func TestDedupe(t *testing.T) {
 			// through unchanged.
 			"solo": {{Version: "1.0.0-r0", Timestamp: t0}},
 		},
-		real: map[string]struct{}{},
-		provides: map[string][]PackageVersion{
-			// Same provider emitted from two sources (chainguard + org
-			// mirror) collapses to a single entry. A distinct provider at
-			// the same (name, version) is preserved.
-			"cmd:node=24.14.0-r0": {
-				{Name: "nodejs-24", Version: "24.14.0-r0"},
-				{Name: "nodejs-24", Version: "24.14.0-r0"},
-				{Name: "nodejs-lts", Version: "24.14.0-r0"},
-			},
-		},
 	}
 
 	dedupe(merged)
@@ -255,16 +228,6 @@ func TestDedupe(t *testing.T) {
 	}
 	if got := len(merged.releases["solo"]); got != 1 {
 		t.Errorf("solo len = %d, want 1", got)
-	}
-
-	gotPackageVersions := merged.provides["cmd:node=24.14.0-r0"]
-	sort.Slice(gotPackageVersions, func(i, j int) bool { return gotPackageVersions[i].Name < gotPackageVersions[j].Name })
-	wantPackageVersions := []PackageVersion{
-		{Name: "nodejs-24", Version: "24.14.0-r0"},
-		{Name: "nodejs-lts", Version: "24.14.0-r0"},
-	}
-	if !reflect.DeepEqual(gotPackageVersions, wantPackageVersions) {
-		t.Errorf("providers = %+v, want %+v", gotPackageVersions, wantPackageVersions)
 	}
 }
 
@@ -297,13 +260,9 @@ func TestIndexStore_GetAndReplace(t *testing.T) {
 	if got := s.Get("missing"); got != nil {
 		t.Errorf("Get on empty store = %v, want nil", got)
 	}
-	s.Replace(
-		map[string][]Release{
-			"foo": {{Version: "1", Timestamp: time.Unix(1, 0)}},
-		},
-		map[string]struct{}{"foo=1": {}},
-		nil,
-	)
+	s.Replace(map[string][]Release{
+		"foo": {{Version: "1", Timestamp: time.Unix(1, 0)}},
+	})
 	got := s.Get("foo")
 	if len(got) != 1 || got[0].Version != "1" {
 		t.Fatalf("Get after Replace = %+v, want foo@1", got)
@@ -312,69 +271,5 @@ func TestIndexStore_GetAndReplace(t *testing.T) {
 	got[0].Version = "mutated"
 	if s.Get("foo")[0].Version != "1" {
 		t.Errorf("Get should return a copy; store was mutated")
-	}
-	// A real package folds its own (name, version) into Providers() as a
-	// self-entry so callers don't need a separate "is this real?" check.
-	if got := s.Providers("foo", "1"); len(got) != 1 || got[0] != (PackageVersion{Name: "foo", Version: "1"}) {
-		t.Errorf("Providers(foo, 1) = %+v, want [{foo 1}]", got)
-	}
-	if got := s.Providers("foo", "9"); got != nil {
-		t.Errorf("Providers(foo, 9) = %+v, want nil", got)
-	}
-}
-
-func TestIndexStore_Providers_LookupsAndSelfFold(t *testing.T) {
-	s := NewIndexStore()
-	// nodejs=24.14.0-r0 is a pure provide (no real package by that name).
-	// cmd:node=24.14.0-r0 has two distinct providers.
-	// curl=8.21.0-r1 is a real package with no `p:` entries; Providers()
-	// should still fold in the self-provider so callers don't need a
-	// separate Real() branch.
-	s.Replace(
-		map[string][]Release{
-			"nodejs":   {{Version: "24.14.0-r0"}},
-			"cmd:node": {{Version: "24.14.0-r0"}},
-			"curl":     {{Version: "8.21.0-r1"}},
-		},
-		map[string]struct{}{
-			"nodejs-24=24.14.0-r0":  {},
-			"nodejs-lts=24.14.0-r0": {},
-			"curl=8.21.0-r1":        {},
-		},
-		map[string][]PackageVersion{
-			"nodejs=24.14.0-r0": {
-				{Name: "nodejs-24", Version: "24.14.0-r0"},
-			},
-			"cmd:node=24.14.0-r0": {
-				{Name: "nodejs-24", Version: "24.14.0-r0"},
-				{Name: "nodejs-lts", Version: "24.14.0-r0"},
-			},
-		},
-	)
-
-	got := s.Providers("nodejs", "24.14.0-r0")
-	want := []PackageVersion{{Name: "nodejs-24", Version: "24.14.0-r0"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Providers(nodejs, 24.14.0-r0) = %+v, want %+v", got, want)
-	}
-
-	got = s.Providers("cmd:node", "24.14.0-r0")
-	want = []PackageVersion{
-		{Name: "nodejs-24", Version: "24.14.0-r0"},
-		{Name: "nodejs-lts", Version: "24.14.0-r0"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Providers(cmd:node, 24.14.0-r0) = %+v, want %+v", got, want)
-	}
-
-	// Real package: self-provider is prepended.
-	got = s.Providers("curl", "8.21.0-r1")
-	want = []PackageVersion{{Name: "curl", Version: "8.21.0-r1"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Providers(curl, 8.21.0-r1) = %+v, want %+v", got, want)
-	}
-
-	if got := s.Providers("nonesuch", "1.0"); got != nil {
-		t.Errorf("Providers(nonesuch, 1.0) = %+v, want nil", got)
 	}
 }

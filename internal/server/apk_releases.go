@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
 )
 
 // APKRelease is one entry in the /v1/apk/{name}/releases response.

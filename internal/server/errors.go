@@ -12,8 +12,8 @@ type apiError struct {
 }
 
 // writeAPIError serialises a structured JSON error onto w. Used in place of
-// http.Error everywhere except /healthz so clients (and the diff page JS)
-// can surface the message verbatim.
+// http.Error everywhere except /healthz so clients can surface the message
+// verbatim.
 func writeAPIError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

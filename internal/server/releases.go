@@ -7,12 +7,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
-
-// DefaultHistoryConcurrency is the default fan-out used when applyCooldown is
-// given concurrency <= 0.
-const DefaultHistoryConcurrency = 16
 
 // maxCooldown bounds the ?cooldown= override at one year. Beyond
 // that we assume a malformed request rather than intent.
@@ -72,10 +68,10 @@ type historyFn func(ctx context.Context, tagID string) ([]chainguard.TagHistory,
 //   - if no such history entry exists, omit the tag.
 //
 // History lookups run concurrently, bounded by `concurrency`
-// (DefaultHistoryConcurrency if <= 0). Output order matches input order.
+// (defaultHistoryConcurrency if <= 0). Output order matches input order.
 func applyCooldown(ctx context.Context, tags []chainguard.Tag, cutoff time.Time, history historyFn, concurrency int) ([]Release, error) {
 	if concurrency <= 0 {
-		concurrency = DefaultHistoryConcurrency
+		concurrency = defaultHistoryConcurrency
 	}
 
 	slots := make([]*Release, len(tags))

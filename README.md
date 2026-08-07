@@ -4,58 +4,29 @@
 > This project is developed by the Chainguard Professional Services team and maintenance is provided on a best-effort basis.
 
 A [Renovate custom datasource](https://docs.renovatebot.com/modules/datasource/custom/)
-for Chainguard images, APK packages and Helm charts.
+for Chainguard images, Helm charts and APK packages.
 
-It implements two features for each artifact type:
+This primarily supports two use cases:
 
-1. An optional cooldown that only surfaces updates at least *N*
-   time in the past.
-2. Detailed changelog URLs, via a custom UI that diffs the old and the new
-   update.
-
-## Screenshots
-
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <a href="images/pr-body.webp"><img src="images/pr-body.webp" width="280" alt="Renovate PR body"></a><br>
-      <sub>Renovate PR body</sub>
-    </td>
-    <td align="center" width="50%">
-      <a href="images/dockerfile-diff.webp"><img src="images/dockerfile-diff.webp" width="280" alt="Dockerfile diff"></a><br>
-      <sub>Dockerfile diff</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <a href="images/image-diff.webp"><img src="images/image-diff.webp" width="280" alt="Image diff"></a><br>
-      <sub>Image diff</sub>
-    </td>
-    <td align="center" width="50%">
-      <a href="images/apk-diff.webp"><img src="images/apk-diff.webp" width="280" alt="APK diff"></a><br>
-      <sub>APK diff</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <a href="images/helm-diff.webp"><img src="images/helm-diff.webp" width="280" alt="Helm chart diff"></a><br>
-      <sub>Helm chart diff</sub>
-    </td>
-    <td align="center" width="50%"></td>
-  </tr>
-</table>
+- **Cooldown for images and charts.** Renovate's built-in `docker`
+  datasource doesn't honour `minimumReleaseAge`; this datasource fills the
+  gap by only surfacing updates at least *N* time in the past. Pairs
+  nicely with Chainguard's optional [`cooldown` policy](https://edu.chainguard.dev/chainguard/chainguard-repository/container-policies/#cooldown)
+  for containers, which blocks pulls at the registry level.
+- **APK package versions.** Renovate has no native support for Chainguard's APK
+  packages, so pinned `apk add pkg=version` lines can't be kept up to date
+  without a custom datasource.
 
 ## Configuring Renovate
 
-Refer to these pages for examples of configuring Renovate to use the datasource
-in different scenarios:
+Examples of configuring Renovate to use the datasource.
 
-- [Updating Images in Dockerfiles](docs/repo-dockerfile.md)
+- [Updating Chainguard Images in Dockerfiles](docs/repo-dockerfile.md)
 - [Updating APK Package Versions in Dockerfiles](docs/apk-dockerfile.md)
-- [Updating Helm Charts in ArgoCD Applications](docs/helm-argocd.md)
-- [Updating Helm Charts as Chart.yaml Dependencies](docs/helm-dependency.md)
-- [Updating Helm Charts in Flux](docs/helm-flux.md)
-- [Updating Helm Charts in Helmfiles](docs/helm-helmfile.md)
+- [Updating Chainguard Helm Charts in ArgoCD Applications](docs/helm-argocd.md)
+- [Updating Chainguard Helm Charts as Chart.yaml Dependencies](docs/helm-dependency.md)
+- [Updating Chainguard Helm Charts in Flux](docs/helm-flux.md)
+- [Updating Chainguard Helm Charts in Helmfiles](docs/helm-helmfile.md)
 
 ## Build
 
@@ -81,6 +52,38 @@ chainctl auth login
 
 # Run the service
 ./renovate-datasource --org=my.org.com
+```
+
+The datasource endpoints are then a plain HTTP GET away:
+
+```
+$ curl -sf http://localhost:8080/v1/apk/curl/releases
+{
+  "releases": [
+    {
+      "version": "8.21.0-r1",
+      "releaseTimestamp": "2026-06-30T04:35:58Z"
+    },
+    {
+      "version": "8.21.0-r0",
+      "releaseTimestamp": "2026-06-24T08:29:32Z"
+    }
+  ]
+}
+```
+
+Point Renovate at it via a [custom
+datasource](https://docs.renovatebot.com/modules/datasource/custom/):
+
+```json
+{
+  "customDatasources": {
+    "chainguard-apk": {
+      "defaultRegistryUrlTemplate": "http://localhost:8080/v1/apk/{{packageName}}/releases",
+      "format": "json"
+    }
+  }
+}
 ```
 
 ### Kubernetes
@@ -132,7 +135,7 @@ Disabled by default. Enable it either server-wide with `--cooldown=<duration>`
 `/releases`. The query parameter, when present, overrides the flag. When
 used, it provides a view of the releases as of *N* time in the past.
 
-#### Images
+### Images
 
 The datasource lists tags with
 [`/registry/v1/tags`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags)
@@ -162,7 +165,7 @@ is used to rewind the tag back to the latest digest outside of the window.
 If no historical digest satisfies the cooldown then the tag is omitted from the
 results entirely.
 
-#### APKs
+### APKs
 
 The datasource pulls the APKINDEX for each of the organization's repositories
 at startup and regularly refreshes it according to the value of
@@ -182,11 +185,11 @@ where the timestamp falls inside the cooldown window.
   "releases": [
     {
       "version": "3.14.5-r0",
-      "releaseTimestamp": "2026-06-10T20:18:06.42Z",
+      "releaseTimestamp": "2026-06-10T20:18:06.42Z"
     },
     {
       "version": "3.14.6-r1",
-      "releaseTimestamp": "2026-06-14T18:46:31.317Z",
+      "releaseTimestamp": "2026-06-14T18:46:31.317Z"
     }
   ]
 }
@@ -197,39 +200,10 @@ This supports provides and prefixed capabilities as well:
    (`nodejs-26`, `nodejs-25` etc)
 2. And `cmd:gcloud`, which will return versions for `google-cloud-sdk`.
 
-#### Helm Charts
+### Helm Charts
 
 Chainguard Helm charts are OCI artifacts under
 `cgr.dev/<org>/charts/<name>` and `cgr.dev/<org>/iamguarded-charts/<name>`.
 The datasource serves their tags via `/v1/charts/{name}/releases` and
 `/v1/iamguarded-charts/{name}/releases`, using the same tag-history rewind
 that the image endpoint uses.
-
-### Changelogs
-
-#### Images
-
-The datasource hosts a site at `/repo/{repo}/diff/{fromRef}/{toRef}` which
-compares the image configuration, SBOMs and apko definitions of the two
-tags/digests.
-
-The page also surfaces the changes in vulnerabilities between the two images by
-scanning both SBOMs with `grype`. This behaviour can be disabled with
-`--grype-scan=false`.
-
-#### APKs
-
-The datasource hosts a site at
-`/apk/{fromName}/version/{fromVer}/diff/{toName}/version/{toVer}` that
-extracts and compares the `.melange.yaml` and `.PKGINFO` files from the
-control-section of the APK packages.
-
-#### Helm Charts
-
-The datasource hosts a site at `/charts/{chart}/diff/{fromRef}/{toRef}`
-for regular Chainguard charts, and
-`/iamguarded-charts/{chart}/diff/{fromRef}/{toRef}` for iamguarded
-charts.
-
-Both pages compare the images that have been added, updated or removed from the
-chart, as well as differences in the **Chart.yaml** and **values.yaml**.

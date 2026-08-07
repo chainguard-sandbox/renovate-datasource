@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
 type readyBackend struct{ err error }
@@ -21,7 +21,7 @@ func (r *readyBackend) ListTagHistory(context.Context, string) ([]chainguard.Tag
 func (r *readyBackend) Ready(context.Context) error { return r.err }
 
 func TestReadyz_NoAPKIndex(t *testing.T) {
-	h := New(&readyBackend{}, nil).Handler()
+	h := New(&readyBackend{}).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -36,7 +36,7 @@ func TestReadyz_APKIndexEmpty(t *testing.T) {
 	// An unpopulated index simulates the case where NewIndexStoreWithRefresh
 	// returned an empty store because the initial load failed.
 	empty := apk.NewIndexStore()
-	h := New(&readyBackend{}, nil, WithAPKIndex(empty)).Handler()
+	h := New(&readyBackend{}, WithAPKIndex(empty)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -49,12 +49,8 @@ func TestReadyz_APKIndexEmpty(t *testing.T) {
 
 func TestReadyz_APKIndexPopulated(t *testing.T) {
 	populated := apk.NewIndexStore()
-	populated.Replace(
-		map[string][]apk.Release{"foo": {{Version: "1.0.0"}}},
-		map[string]struct{}{"foo": {}},
-		nil,
-	)
-	h := New(&readyBackend{}, nil, WithAPKIndex(populated)).Handler()
+	populated.Replace(map[string][]apk.Release{"foo": {{Version: "1.0.0"}}})
+	h := New(&readyBackend{}, WithAPKIndex(populated)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()

@@ -23,16 +23,6 @@ cooldown: ""
 # -- Max concurrent ListTagHistory calls per request (--history-concurrency).
 historyConcurrency: 16
 
-grype:
-  # -- Enable vulnerability diffs on the image diff page
-  # (--grype-scan). False skips the ~1GB DB download.
-  scan: true
-  # -- Background refresh interval for the grype DB
-  # (--grype-db-refresh), Go duration string.
-  dbRefresh: 24h
-  # -- Size limit for the emptyDir holding the DB (~1GB).
-  dbSizeLimit: 2Gi
-
 # -- Listen port for the HTTP service (--port).
 port: 8080
 

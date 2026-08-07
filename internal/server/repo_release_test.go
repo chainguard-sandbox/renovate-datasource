@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
 func TestApplyCooldown(t *testing.T) {
@@ -289,7 +289,7 @@ func TestHandleReleasesCooldownQueryParam(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &stubReleasesBackend{tags: []chainguard.Tag{freshTag}}
-			h := New(backend, nil, WithCooldown(tc.serverCooldown)).Handler()
+			h := New(backend, WithCooldown(tc.serverCooldown)).Handler()
 
 			req := httptest.NewRequest(http.MethodGet, "/v1/repo/foo/releases"+tc.query, nil)
 			rec := httptest.NewRecorder()

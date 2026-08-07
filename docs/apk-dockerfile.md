@@ -1,6 +1,6 @@
 # Updating APK Package Versions in Dockerfiles
 
-An example Renovate configuration that updates pinned APK packages in
+Example Renovate configuration that updates pinned APK packages in
 Dockerfiles using the custom datasource.
 
 This will update pinned packages like:
@@ -18,12 +18,12 @@ apk add --no-cache \
 > and keep both the packages and the images up to date with Renovate.
 > Use the same cooldown for both so they move forward together.
 
-To use this yourself, make the following changes:
+To use this example:
 
 - Replace `<datasource-host>` with the hostname of the datasource running
   in your environment.
-- Remove `?cooldown=168h` from the `defaultRegistryUrlTemplate` if you
-  aren't interested in cooldown.
+- Adjust the cooldown window by changing the `cooldown=168h` query parameter,
+  or drop it entirely to disable per-request cooldown.
 
 ```jsonc
 {
@@ -38,8 +38,7 @@ To use this yourself, make the following changes:
     {
       "matchDatasources": ["custom.chainguard-apk"],
       "versioning": "loose",
-      "commitMessageTopic": "apk {{depName}}",
-      "changelogUrl": "http://<datasource-host>/apk/{{depName}}/version/{{currentValue}}/diff/{{depName}}/version/{{newValue}}"
+      "commitMessageTopic": "apk {{depName}}"
     }
   ],
   "customManagers": [

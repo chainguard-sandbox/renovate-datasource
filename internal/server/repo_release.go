@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
 func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {

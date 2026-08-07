@@ -32,20 +32,7 @@ type Release struct {
 type IndexStore struct {
 	mu       sync.RWMutex
 	releases map[string][]Release
-	// real records which (name, version) pairs came from a P:/V: field
-	// (as opposed to a p: entry). Consulted by Providers() to fold in
-	// the self-provider when the pair is itself installable.
-	real map[string]struct{}
-	// provides maps every `p:` entry (keyed as "name=version") to the
-	// real packages that emit it. Real packages don't appear as their
-	// own providers here; Providers() folds that self-entry in.
-	provides map[string][]PackageVersion
 }
-
-// providesKey builds the composite key used for the `real` set and the
-// `provides` reverse index. Package names can't contain `=` so this
-// mapping is unambiguous.
-func providesKey(name, version string) string { return name + "=" + version }
 
 // NewIndexStore returns an empty IndexStore. Get on an empty store
 // always yields nil, matching the "no releases known" case the handler
@@ -55,8 +42,6 @@ func providesKey(name, version string) string { return name + "=" + version }
 func NewIndexStore() *IndexStore {
 	return &IndexStore{
 		releases: map[string][]Release{},
-		real:     map[string]struct{}{},
-		provides: map[string][]PackageVersion{},
 	}
 }
 
@@ -91,28 +76,6 @@ func (s *IndexStore) Get(name string) []Release {
 	return out
 }
 
-// Providers returns the real packages that make name+version resolvable
-// at install time. If the pair is itself a real package it appears
-// first in the slice (as a self-provider), so callers can treat the
-// result as authoritative without a separate "is this real?" check.
-// Nil when nothing in the store provides (name, version).
-func (s *IndexStore) Providers(name, version string) []PackageVersion {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	key := providesKey(name, version)
-	_, isReal := s.real[key]
-	others := s.provides[key]
-	if !isReal && len(others) == 0 {
-		return nil
-	}
-	out := make([]PackageVersion, 0, len(others)+1)
-	if isReal {
-		out = append(out, PackageVersion{Name: name, Version: version})
-	}
-	out = append(out, others...)
-	return out
-}
-
 // Len returns the number of packages currently indexed. Useful for
 // startup log lines and /readyz-style diagnostics.
 func (s *IndexStore) Len() int {
@@ -122,19 +85,11 @@ func (s *IndexStore) Len() int {
 }
 
 // Replace atomically swaps the store's contents. IndexLoader calls
-// this once per refresh with the fully-rebuilt maps so readers never
-// observe a partial update. All three arguments are installed together.
-func (s *IndexStore) Replace(releases map[string][]Release, real map[string]struct{}, provides map[string][]PackageVersion) {
-	if real == nil {
-		real = map[string]struct{}{}
-	}
-	if provides == nil {
-		provides = map[string][]PackageVersion{}
-	}
+// this once per refresh with the fully-rebuilt map so readers never
+// observe a partial update.
+func (s *IndexStore) Replace(releases map[string][]Release) {
 	s.mu.Lock()
 	s.releases = releases
-	s.real = real
-	s.provides = provides
 	s.mu.Unlock()
 }
 
@@ -188,20 +143,15 @@ func newIndexHTTPClient() *http.Client {
 }
 
 // indexData is the mutable scratch space parseIndex/parseAPKINDEX write
-// into. Bundling the three maps into one struct keeps callers (parser,
-// dedupe, IndexLoader) from threading them individually and makes it
-// easy to swap the whole thing atomically when Load finishes.
+// into. Wrapping the map in a struct keeps room for future scratch state
+// (e.g. per-source counters) without threading extra arguments.
 type indexData struct {
 	releases map[string][]Release
-	real     map[string]struct{}
-	provides map[string][]PackageVersion
 }
 
 func newIndexData() *indexData {
 	return &indexData{
 		releases: map[string][]Release{},
-		real:     map[string]struct{}{},
-		provides: map[string][]PackageVersion{},
 	}
 }
 
@@ -254,8 +204,8 @@ func (l *IndexLoader) Load(ctx context.Context) error {
 		return fmt.Errorf("all apk index sources failed; last error: %w", lastErr)
 	}
 	dedupe(merged)
-	l.store.Replace(merged.releases, merged.real, merged.provides)
-	l.log.InfoContext(ctx, "apk index installed", "sources", loaded, "packages", len(merged.releases), "provides", len(merged.provides))
+	l.store.Replace(merged.releases)
+	l.log.InfoContext(ctx, "apk index installed", "sources", loaded, "packages", len(merged.releases))
 	return nil
 }
 
@@ -266,11 +216,6 @@ func (l *IndexLoader) Load(ctx context.Context) error {
 // identical or near-identical build times; deduping cuts the resident
 // footprint of the store substantially and avoids returning duplicate
 // versions to Renovate.
-//
-// PackageVersion slices go through the same treatment: multiple sources
-// carrying the same real package emit a PackageVersion entry per
-// source, so without dedup a `cmd:node=X` lookup would surface the
-// same underlying nodejs-N package 2-3× in the chooser UI.
 func dedupe(d *indexData) {
 	for name, releases := range d.releases {
 		if len(releases) < 2 {
@@ -291,21 +236,6 @@ func dedupe(d *indexData) {
 			out = append(out, r)
 		}
 		d.releases[name] = out
-	}
-	for key, providers := range d.provides {
-		if len(providers) < 2 {
-			continue
-		}
-		seen := make(map[PackageVersion]struct{}, len(providers))
-		out := providers[:0]
-		for _, p := range providers {
-			if _, ok := seen[p]; ok {
-				continue
-			}
-			seen[p] = struct{}{}
-			out = append(out, p)
-		}
-		d.provides[key] = out
 	}
 }
 
@@ -381,9 +311,8 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 	flush := func() {
 		if name != "" && cur.Version != "" {
 			out.releases[name] = append(out.releases[name], cur)
-			out.real[providesKey(name, cur.Version)] = struct{}{}
 			added++
-			addProvides(provides, name, cur.Version, cur.Timestamp, out)
+			addProvides(provides, cur.Timestamp, out)
 		}
 		cur = Release{}
 		name = ""
@@ -429,12 +358,6 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 // `pc:openssl`, and the like) are indexed too so callers can look up
 // versions against the same names apk-tools resolves against.
 //
-// realName / realVer are the P:/V: values of the record emitting the
-// `p:` entries; they're stashed in the provides reverse index so the
-// diff handler can trace a provides pin (e.g. `cmd:node=24.14.0-r0`)
-// back to the installable package (`nodejs-24 24.14.0-r0`) whose .apk
-// it actually needs to fetch.
-//
 // The `p:` field is a space-separated list of `name[=version]` entries.
 // Nameonly entries (no `=`) are skipped since there's no version to
 // update against, and the `=0` "unversioned provide" idiom (e.g.
@@ -442,10 +365,9 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 // — surfacing it would just add a bogus "version 0" to the response.
 //
 // Timestamp is the package's build time. When multiple packages provide
-// the same name at the same version, dedupe() at merge time collapses
-// both the release entries (by newest timestamp) and the provider list
-// (uniquing by PackageVersion identity across sources).
-func addProvides(list string, realName, realVer string, ts time.Time, out *indexData) {
+// the same name at the same version, dedupe() collapses the resulting
+// release entries by newest timestamp.
+func addProvides(list string, ts time.Time, out *indexData) {
 	if list == "" {
 		return
 	}
@@ -459,7 +381,5 @@ func addProvides(list string, realName, realVer string, ts time.Time, out *index
 			continue
 		}
 		out.releases[name] = append(out.releases[name], Release{Version: ver, Timestamp: ts})
-		key := providesKey(name, ver)
-		out.provides[key] = append(out.provides[key], PackageVersion{Name: realName, Version: realVer})
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/apk"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
 )
 
 // buildStore stamps a synthetic index into an apk.IndexStore so the
@@ -15,13 +15,13 @@ import (
 // the network.
 func buildStore(entries map[string][]apk.Release) *apk.IndexStore {
 	s := apk.NewIndexStore()
-	s.Replace(entries, nil, nil)
+	s.Replace(entries)
 	return s
 }
 
 func TestHandleAPKReleases_UnknownPackage(t *testing.T) {
 	store := buildStore(nil)
-	h := New(nil, nil, WithAPKIndex(store)).Handler()
+	h := New(nil, WithAPKIndex(store)).Handler()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/nonesuch/releases", nil)
@@ -33,9 +33,9 @@ func TestHandleAPKReleases_UnknownPackage(t *testing.T) {
 }
 
 func TestHandleAPKReleases_NotImplemented(t *testing.T) {
-	// No index attached → 501, matching how the diff/version endpoints
-	// behave when their fetcher is nil.
-	h := New(nil, nil).Handler()
+	// No index attached → 501, so orchestrators can detect a deployment
+	// where the apk feature is intentionally disabled.
+	h := New(nil).Handler()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases", nil)
@@ -61,7 +61,7 @@ func TestHandleAPKReleases_CooldownFilterAndSort(t *testing.T) {
 		},
 	})
 
-	srv := New(nil, nil, WithAPKIndex(store))
+	srv := New(nil, WithAPKIndex(store))
 	srv.now = func() time.Time { return now }
 	h := srv.Handler()
 
@@ -97,7 +97,7 @@ func TestHandleAPKReleases_NoCooldownReturnsAll(t *testing.T) {
 			{Version: "1.1.0-r0", Timestamp: now},
 		},
 	})
-	srv := New(nil, nil, WithAPKIndex(store))
+	srv := New(nil, WithAPKIndex(store))
 	srv.now = func() time.Time { return now }
 	h := srv.Handler()
 
@@ -119,7 +119,7 @@ func TestHandleAPKReleases_BadCooldown(t *testing.T) {
 	store := buildStore(map[string][]apk.Release{
 		"foo": {{Version: "1.0.0-r0"}},
 	})
-	h := New(nil, nil, WithAPKIndex(store)).Handler()
+	h := New(nil, WithAPKIndex(store)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases?cooldown=whatever", nil)
 	rec := httptest.NewRecorder()
@@ -132,7 +132,7 @@ func TestHandleAPKReleases_BadCooldown(t *testing.T) {
 
 func TestHandleAPKReleases_MalformedName(t *testing.T) {
 	store := buildStore(nil)
-	h := New(nil, nil, WithAPKIndex(store)).Handler()
+	h := New(nil, WithAPKIndex(store)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/BAD..NAME/releases", nil)
 	rec := httptest.NewRecorder()
@@ -150,7 +150,7 @@ func TestHandleAPKReleases_PrefixedProvidesName(t *testing.T) {
 	store := buildStore(map[string][]apk.Release{
 		"cmd:node": {{Version: "24.14.0-r0", Timestamp: time.Unix(1_700_000_000, 0).UTC()}},
 	})
-	h := New(nil, nil, WithAPKIndex(store)).Handler()
+	h := New(nil, WithAPKIndex(store)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/cmd:node/releases", nil)
 	rec := httptest.NewRecorder()

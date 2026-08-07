@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainguard-demo/cookbook/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
 type chartReleasesBackend struct {
@@ -51,7 +51,7 @@ func TestHandleChartReleases_ComposesSubrepo(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &chartReleasesBackend{tags: []chainguard.Tag{tag}}
-			h := New(backend, nil).Handler()
+			h := New(backend).Handler()
 
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			rec := httptest.NewRecorder()
@@ -107,7 +107,7 @@ func TestHandleChartReleases_RejectsBadName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &chartReleasesBackend{}
-			h := New(backend, nil).Handler()
+			h := New(backend).Handler()
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
