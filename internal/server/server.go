@@ -13,13 +13,11 @@ import (
 )
 
 // Conservative repo-name pattern: lowercase, digits, dashes, underscores,
-// dots, and single internal slashes. Blocks `..`, leading dots, query strings.
+// dots, and single internal slashes. Multi-segment paths are how the
+// datasource serves subrepos — e.g. `charts/nginx` and
+// `iamguarded-charts/postgresql` resolve to Helm charts under those
+// subgroups. Blocks `..`, leading dots, query strings.
 var repoNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*$`)
-
-// chartNamePattern is repoNamePattern restricted to a single segment.
-// Chart URLs carry only the chart's short name; the subrepo prefix
-// (charts/ or iamguarded-charts/) is composed server-side.
-var chartNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
 
 // apkProvidesNamePattern accepts apk package names, including apk
 // capability prefixes emitted by APKINDEX (`cmd:node`, `so:libssl.so.3`,
@@ -104,8 +102,6 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /v1/repo/{path...}", s.handleRepoV1)
-	mux.HandleFunc("GET /v1/charts/{name}/releases", s.handleChartReleases)
-	mux.HandleFunc("GET /v1/iamguarded-charts/{name}/releases", s.handleIamguardedChartReleases)
 	mux.HandleFunc("GET /v1/apk/{name}/releases", s.handleAPKReleases)
 	return mux
 }

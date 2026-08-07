@@ -214,13 +214,17 @@ func TestApplyCooldown_FansOutHistoryCalls(t *testing.T) {
 
 // stubReleasesBackend serves a fixed tag list and records how many times
 // ListTagHistory is called. That call count is the observable proxy we use to
-// tell whether the cooldown path ran or the pass-through path did.
+// tell whether the cooldown path ran or the pass-through path did. lastRepo
+// captures the last repo string ListTags received so multi-segment routing
+// can be verified end-to-end.
 type stubReleasesBackend struct {
-	tags       []chainguard.Tag
-	histCalls  atomic.Int32
+	tags      []chainguard.Tag
+	histCalls atomic.Int32
+	lastRepo  atomic.Value // string
 }
 
-func (b *stubReleasesBackend) ListTags(_ context.Context, _ string) ([]chainguard.Tag, error) {
+func (b *stubReleasesBackend) ListTags(_ context.Context, repo string) ([]chainguard.Tag, error) {
+	b.lastRepo.Store(repo)
 	return b.tags, nil
 }
 func (b *stubReleasesBackend) ListTagHistory(_ context.Context, _ string) ([]chainguard.TagHistory, error) {
@@ -228,6 +232,66 @@ func (b *stubReleasesBackend) ListTagHistory(_ context.Context, _ string) ([]cha
 	return nil, nil
 }
 func (b *stubReleasesBackend) Ready(_ context.Context) error { return nil }
+
+// TestHandleReleases_MultiSegmentPath confirms the /v1/repo/{path...}
+// dispatcher passes multi-segment paths (used for Helm charts under
+// `charts/…` and `iamguarded-charts/…`) straight through to the backend.
+func TestHandleReleases_MultiSegmentPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		url        string
+		wantRepo   string
+		wantStatus int
+	}{
+		{
+			name:       "single-segment image",
+			url:        "/v1/repo/python/releases",
+			wantRepo:   "python",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "two-segment charts subrepo",
+			url:        "/v1/repo/charts/kube-prometheus-stack/releases",
+			wantRepo:   "charts/kube-prometheus-stack",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "two-segment iamguarded-charts subrepo",
+			url:        "/v1/repo/iamguarded-charts/nginx/releases",
+			wantRepo:   "iamguarded-charts/nginx",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "missing /releases suffix returns 404",
+			url:        "/v1/repo/charts/nginx",
+			wantStatus: http.StatusNotFound,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &stubReleasesBackend{tags: []chainguard.Tag{
+				{ID: "1", Name: "1", LastUpdated: time.Now().Add(-30 * 24 * time.Hour), Digest: "sha256:x"},
+			}}
+			h := New(backend).Handler()
+
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if tc.wantStatus != http.StatusOK {
+				return
+			}
+			got, _ := backend.lastRepo.Load().(string)
+			if got != tc.wantRepo {
+				t.Errorf("backend saw repo=%q, want %q", got, tc.wantRepo)
+			}
+		})
+	}
+}
 
 func TestHandleReleasesCooldownQueryParam(t *testing.T) {
 	// A single "fresh" tag whose current digest is newer than any positive

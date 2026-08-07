@@ -135,10 +135,18 @@ Disabled by default. Enable it either server-wide with `--cooldown=<duration>`
 `/releases`. The query parameter, when present, overrides the flag. When
 used, it provides a view of the releases as of *N* time in the past.
 
-### Images
+### Images and Helm Charts
 
-The datasource lists tags with
-[`/registry/v1/tags`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags)
+Releases for images and helm charts are returned from the same `/v1/repo/{repo}/releases`
+URL pattern.
+
+```
+/v1/repo/python/releases                       → cgr.dev/<org>/python
+/v1/repo/charts/nginx/releases                 → cgr.dev/<org>/charts/nginx
+/v1/repo/iamguarded-charts/postgresql/releases → cgr.dev/<org>/iamguarded-charts/postgresql
+```
+
+The datasource lists the tags with [`/registry/v1/tags`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags)
 and formats the results in the expected format.
 
 ```json
@@ -200,10 +208,3 @@ This supports provides and prefixed capabilities as well:
    (`nodejs-26`, `nodejs-25` etc)
 2. And `cmd:gcloud`, which will return versions for `google-cloud-sdk`.
 
-### Helm Charts
-
-Chainguard Helm charts are OCI artifacts under
-`cgr.dev/<org>/charts/<name>` and `cgr.dev/<org>/iamguarded-charts/<name>`.
-The datasource serves their tags via `/v1/charts/{name}/releases` and
-`/v1/iamguarded-charts/{name}/releases`, using the same tag-history rewind
-that the image endpoint uses.

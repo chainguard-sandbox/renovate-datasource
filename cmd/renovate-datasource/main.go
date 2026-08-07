@@ -45,10 +45,11 @@ func newRootCmd() *cobra.Command {
 		Long: `An HTTP service that acts as a Renovate custom datasource for a single
 Chainguard org. It exposes the /releases endpoints Renovate consumes:
 
-  * /v1/repo/{repo}/releases
-  * /v1/apk/{name}/releases
-  * /v1/charts/{name}/releases
-  * /v1/iamguarded-charts/{name}/releases
+  * /v1/repo/{repo}/releases   images and charts (repo may be multi-segment,
+                               e.g. "python", "charts/nginx",
+                               "iamguarded-charts/postgresql")
+  * /v1/apk/{name}/releases    apk packages, including prefixed capabilities
+                               like "cmd:gcloud" or unversioned "nodejs"
 
 Pass --cooldown=<dur> to set a server-wide default, or ?cooldown=<dur>
 per request, to only surface digests that have been stable that long.

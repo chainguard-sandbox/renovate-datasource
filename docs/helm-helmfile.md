@@ -35,12 +35,8 @@ To use this example:
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
-    "chainguard-chart": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/charts/{{packageName}}/releases?cooldown=168h",
-      "format": "json"
-    },
-    "chainguard-iamguarded-chart": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/iamguarded-charts/{{packageName}}/releases?cooldown=168h",
+    "chainguard-repo": {
+      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?cooldown=168h",
       "format": "json"
     }
   },
@@ -51,7 +47,8 @@ To use this example:
       "enabled": false
     },
     {
-      "matchDatasources": ["custom.chainguard-chart", "custom.chainguard-iamguarded-chart"],
+      "matchDatasources": ["custom.chainguard-repo"],
+      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
       "versioning": "semver"
     }
   ],
@@ -61,18 +58,9 @@ To use this example:
       "fileFormat": "yaml",
       "fileMatch": ["(^|/)helmfile\\.ya?ml$"],
       "matchStrings": [
-        "releases[$contains(chart, 'cgr.dev/my-org/charts/')].($n := $substringAfter($substringBefore(chart & '@', '@'), 'charts/'); $exists(version) ? { 'depName': $n, 'packageName': $n, 'currentValue': version, 'currentDigest': $substringAfter(chart, '@') } : { 'depName': $n, 'packageName': $n, 'currentDigest': $substringAfter(chart, '@') })"
+        "releases[$contains(chart, 'cgr.dev/my-org/charts/') or $contains(chart, 'cgr.dev/my-org/iamguarded-charts/')].($pkg := $substringAfter($substringBefore(chart & '@', '@'), 'my-org/'); $name := $substringAfter($pkg, '/'); $exists(version) ? { 'depName': $name, 'packageName': $pkg, 'currentValue': version, 'currentDigest': $substringAfter(chart, '@') } : { 'depName': $name, 'packageName': $pkg, 'currentDigest': $substringAfter(chart, '@') })"
       ],
-      "datasourceTemplate": "custom.chainguard-chart"
-    },
-    {
-      "customType": "jsonata",
-      "fileFormat": "yaml",
-      "fileMatch": ["(^|/)helmfile\\.ya?ml$"],
-      "matchStrings": [
-        "releases[$contains(chart, 'cgr.dev/my-org/iamguarded-charts/')].($n := $substringAfter($substringBefore(chart & '@', '@'), 'iamguarded-charts/'); $exists(version) ? { 'depName': $n, 'packageName': $n, 'currentValue': version, 'currentDigest': $substringAfter(chart, '@') } : { 'depName': $n, 'packageName': $n, 'currentDigest': $substringAfter(chart, '@') })"
-      ],
-      "datasourceTemplate": "custom.chainguard-iamguarded-chart"
+      "datasourceTemplate": "custom.chainguard-repo"
     }
   ]
 }

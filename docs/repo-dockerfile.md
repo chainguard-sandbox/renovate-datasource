@@ -36,6 +36,7 @@ To use this example:
     },
     {
       "matchDatasources": ["custom.chainguard-repo"],
+      "excludePackagePatterns": ["^(charts|iamguarded-charts)/"],
       "versioning": "docker"
     }
   ]

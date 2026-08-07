@@ -46,12 +46,8 @@ To use this example:
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
-    "chainguard-chart": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/charts/{{packageName}}/releases?cooldown=168h",
-      "format": "json"
-    },
-    "chainguard-iamguarded-chart": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/iamguarded-charts/{{packageName}}/releases?cooldown=168h",
+    "chainguard-repo": {
+      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?cooldown=168h",
       "format": "json"
     }
   },
@@ -62,7 +58,8 @@ To use this example:
       "enabled": false
     },
     {
-      "matchDatasources": ["custom.chainguard-chart", "custom.chainguard-iamguarded-chart"],
+      "matchDatasources": ["custom.chainguard-repo"],
+      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
       "versioning": "semver"
     }
   ],
@@ -72,18 +69,9 @@ To use this example:
       "fileFormat": "yaml",
       "fileMatch": ["\\.ya?ml$"],
       "matchStrings": [
-        "spec.source[$contains(repoURL, 'cgr.dev/my-org/charts')].($tr := targetRevision; $substring($tr, 0, 7) = 'sha256:' ? { 'depName': chart, 'packageName': chart, 'currentDigest': $tr } : { 'depName': chart, 'packageName': chart, 'currentValue': $substringBefore($tr & '@', '@'), 'currentDigest': $substringAfter($tr, '@') })"
+        "spec.source[$contains(repoURL, 'cgr.dev/my-org/charts') or $contains(repoURL, 'cgr.dev/my-org/iamguarded-charts')].($sub := $substringAfter(repoURL, 'my-org/'); $tr := targetRevision; $substring($tr, 0, 7) = 'sha256:' ? { 'depName': chart, 'packageName': $sub & '/' & chart, 'currentDigest': $tr } : { 'depName': chart, 'packageName': $sub & '/' & chart, 'currentValue': $substringBefore($tr & '@', '@'), 'currentDigest': $substringAfter($tr, '@') })"
       ],
-      "datasourceTemplate": "custom.chainguard-chart"
-    },
-    {
-      "customType": "jsonata",
-      "fileFormat": "yaml",
-      "fileMatch": ["\\.ya?ml$"],
-      "matchStrings": [
-        "spec.source[$contains(repoURL, 'cgr.dev/my-org/iamguarded-charts')].($tr := targetRevision; $substring($tr, 0, 7) = 'sha256:' ? { 'depName': chart, 'packageName': chart, 'currentDigest': $tr } : { 'depName': chart, 'packageName': chart, 'currentValue': $substringBefore($tr & '@', '@'), 'currentDigest': $substringAfter($tr, '@') })"
-      ],
-      "datasourceTemplate": "custom.chainguard-iamguarded-chart"
+      "datasourceTemplate": "custom.chainguard-repo"
     }
   ]
 }

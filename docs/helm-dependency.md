@@ -35,12 +35,8 @@ To use this example:
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
-    "chainguard-chart": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/charts/{{packageName}}/releases?cooldown=168h",
-      "format": "json"
-    },
-    "chainguard-iamguarded-chart": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/iamguarded-charts/{{packageName}}/releases?cooldown=168h",
+    "chainguard-repo": {
+      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?cooldown=168h",
       "format": "json"
     }
   },
@@ -48,19 +44,13 @@ To use this example:
     {
       "matchManagers": ["helmv3"],
       "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/charts/"],
-      "overrideDatasource": "custom.chainguard-chart",
-      "overridePackageName": "{{{replace \"cgr.dev/my-org/charts/\" \"\" packageName}}}"
+      "matchPackagePatterns": ["^cgr\\.dev/my-org/(charts|iamguarded-charts)/"],
+      "overrideDatasource": "custom.chainguard-repo",
+      "overridePackageName": "{{{replace \"cgr.dev/my-org/\" \"\" packageName}}}"
     },
     {
-      "matchManagers": ["helmv3"],
-      "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/iamguarded-charts/"],
-      "overrideDatasource": "custom.chainguard-iamguarded-chart",
-      "overridePackageName": "{{{replace \"cgr.dev/my-org/iamguarded-charts/\" \"\" packageName}}}"
-    },
-    {
-      "matchDatasources": ["custom.chainguard-chart", "custom.chainguard-iamguarded-chart"],
+      "matchDatasources": ["custom.chainguard-repo"],
+      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
       "versioning": "semver"
     }
   ]
