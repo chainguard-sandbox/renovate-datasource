@@ -22,6 +22,7 @@ type snapshotOptions struct {
 	minimumReleaseAge time.Duration
 	maxReleaseAge     time.Duration
 	concurrency       int
+	apkRepositories   []string
 	datasources       []string
 	logLevel          string
 
@@ -70,16 +71,16 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name (required)")
+	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name. Required unless the repo datasource is disabled and --apk-repository is used to bypass the Chainguard client entirely.")
 	cmd.Flags().StringVarP(&opts.outputDir, "output-dir", "d", "", "output directory; must not already exist (required)")
 	cmd.Flags().DurationVar(&opts.minimumReleaseAge, "min-release-age", 0, "minimum-release-age window (Go duration, e.g. 168h). Frozen at generation time. 0 (default) disables it.")
 	cmd.Flags().DurationVar(&opts.maxReleaseAge, "max-release-age", 0, "drop releases older than this (Go duration, e.g. 4380h for ~6 months) and skip packages/repos with nothing in the window. 0 (default) disables it.")
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 16, "cap on concurrent platform-API calls; also drives the per-package fan-out inside each source and the per-repo history fan-out")
+	cmd.Flags().StringSliceVar(&opts.apkRepositories, "apk-repository", nil, "apk repository root URL (repeatable, comma-separated). When set, overrides the default apk.cgr.dev/virtualapk.cgr.dev chain. Auth is picked up from HTTP_AUTH (format: basic:<host>:<user>:<password>).")
 	cmd.Flags().StringSliceVar(&opts.datasources, "datasource", []string{"repo", "apk"}, "comma-separated list of datasources to snapshot (repo, apk).")
 	cmd.Flags().StringVar(&opts.logLevel, "log-level", "info", "log level: debug, info, warn, error")
 	cmd.Flags().StringVar(&opts.identity, "identity", "", "UIDP of an assumable Chainguard identity (enables identity auth)")
 	cmd.Flags().StringVar(&opts.identityToken, "identity-token", "", "OIDC token to assume the identity; either a file path or a literal JWT")
-	_ = cmd.MarkFlagRequired("org")
 	_ = cmd.MarkFlagRequired("output-dir")
 
 	return cmd
@@ -96,27 +97,21 @@ func runSnapshot(parent context.Context, opts *snapshotOptions) error {
 		return err
 	}
 
-	cgOpts, authLbl, err := chainguardOptions(opts.identity, opts.identityToken)
-	if err != nil {
-		return err
-	}
-	cgOpts = append(cgOpts, chainguard.WithConcurrency(opts.concurrency))
-
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cg, err := chainguard.New(ctx, opts.org, cgOpts...)
-	if err != nil {
-		log.Error("initializing Chainguard client", "err", err)
-		return fmt.Errorf("initializing Chainguard client: %w", err)
-	}
-	defer func() {
-		if err := cg.Close(); err != nil {
-			log.Warn("closing Chainguard client", "err", err)
+	var cg *chainguard.Client
+	if enableRepo || (enableAPK && len(opts.apkRepositories) == 0) {
+		cg, err = newChainguardClient(ctx, log, opts.org, opts.identity, opts.identityToken, opts.concurrency)
+		if err != nil {
+			return err
 		}
-	}()
-
-	log.Info("resolved org", "org", opts.org, "uidp", cg.OrgUIDP, "auth", authLbl, "datasources", opts.datasources)
+		defer func() {
+			if err := cg.Close(); err != nil {
+				log.Warn("closing Chainguard client", "err", err)
+			}
+		}()
+	}
 
 	snapshotOpts := []snapshot.Option{
 		snapshot.WithLogger(log),
@@ -127,7 +122,10 @@ func runSnapshot(parent context.Context, opts *snapshotOptions) error {
 
 	if enableAPK {
 		const apkArch = "x86_64"
-		apkRepos := apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx))
+		apkRepos, err := resolveAPKRepositories(ctx, cg, opts.apkRepositories)
+		if err != nil {
+			return err
+		}
 		// One-shot: interval=0 skips the background refresh; only
 		// the initial synchronous load runs.
 		store, err := apk.NewIndexStoreWithRefresh(ctx, apkArch, apkRepos, 0, log)

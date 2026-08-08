@@ -5,7 +5,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -20,15 +19,7 @@ import (
 // year. Beyond that we assume a malformed request rather than intent.
 const maxMinimumReleaseAge = 365 * 24 * time.Hour
 
-// Readier reports auth-layer readiness. Typically satisfied by
-// *chainguard.Client so /readyz can surface a stale chainctl token
-// or an unreadable identity-token file.
-type Readier interface {
-	Ready(ctx context.Context) error
-}
-
 type Server struct {
-	readier           Readier
 	repoDatasource    datasource.Datasource
 	apkDatasource     datasource.Datasource
 	minimumReleaseAge time.Duration
@@ -36,10 +27,10 @@ type Server struct {
 	log               *slog.Logger
 }
 
-// New builds a Server. readier drives the /readyz auth check.
-// Datasources are attached via WithRepoDatasource / WithAPKDatasource — a datasource
-// is required for its endpoint to be registered.
-func New(readier Readier, opts ...Option) *Server {
+// New builds a Server. Datasources are attached via WithRepoDatasource /
+// WithAPKDatasource — a datasource is required for its endpoint to be
+// registered.
+func New(opts ...Option) *Server {
 	o := options{
 		minimumReleaseAge: defaultMinimumReleaseAge,
 		log:               slog.Default(),
@@ -49,7 +40,6 @@ func New(readier Readier, opts ...Option) *Server {
 		fn(&o)
 	}
 	return &Server{
-		readier:           readier,
 		repoDatasource:    o.repoDatasource,
 		apkDatasource:     o.apkDatasource,
 		minimumReleaseAge: o.minimumReleaseAge,
@@ -65,16 +55,6 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if s.readier != nil {
-			if err := s.readier.Ready(r.Context()); err != nil {
-				// Log the detail server-side; respond with a generic message so
-				// unauthenticated probes can't enumerate internal filesystem
-				// paths or audiences via the readiness endpoint.
-				s.log.WarnContext(r.Context(), "not ready", "err", err)
-				writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
-				return
-			}
-		}
 		for name, ds := range map[string]datasource.Datasource{"repo": s.repoDatasource, "apk": s.apkDatasource} {
 			if ds == nil {
 				continue

@@ -130,6 +130,7 @@ type repoStub struct {
 	allErr     error
 	histCalls  int
 	histResult []chainguard.TagHistory
+	readyErr   error
 }
 
 func (b *repoStub) ListAllRepos(_ context.Context) ([]string, error) {
@@ -149,6 +150,7 @@ func (b *repoStub) ListTagHistory(_ context.Context, _ string) ([]chainguard.Tag
 	b.histCalls++
 	return b.histResult, nil
 }
+func (b *repoStub) Ready(_ context.Context) error { return b.readyErr }
 
 func TestRepoDatasource_ReleasesZeroBeforePassesThrough(t *testing.T) {
 	backend := &repoStub{tags: map[string][]chainguard.Tag{

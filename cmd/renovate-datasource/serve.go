@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -26,6 +25,7 @@ type serveOptions struct {
 	org               string
 	concurrency       int
 	apkIndexRefresh   time.Duration
+	apkRepositories   []string
 	datasources       []string
 	logLevel          string
 
@@ -58,7 +58,14 @@ Examples:
   renovate-datasource serve --org=my.org.com
 
   # Serve only /v1/repo, with a week's default minimum-release-age.
-  renovate-datasource serve --org=my.org.com --datasource=repo --min-release-age=168h`,
+  renovate-datasource serve --org=my.org.com --datasource=repo --min-release-age=168h
+
+  # Serve only /v1/apk from your own mirror; no Chainguard credentials
+  # needed. Provide HTTP_AUTH=basic:mirror.example:user:pass in the
+  # environment if the mirror requires Basic auth.
+  renovate-datasource serve --datasource=apk \
+      --apk-repository=https://mirror.example/apk/chainguard \
+      --apk-repository=https://mirror.example/apk/extra-packages`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runServe(cmd.Context(), opts)
@@ -67,14 +74,14 @@ Examples:
 
 	cmd.Flags().IntVar(&opts.port, "port", 8080, "HTTP listen port")
 	cmd.Flags().DurationVar(&opts.minimumReleaseAge, "min-release-age", 0, "default minimum-release-age window (Go duration, e.g. 168h); can be overridden per request via ?minimumReleaseAge=<dur>. 0 (default) disables it.")
-	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name (required)")
+	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name. Required unless the repo datasource is disabled and --apk-repository is used to bypass the Chainguard client entirely.")
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 16, "cap on concurrent platform-API calls (ListTags, ListTagHistory, ListAllRepos); also bounds per-request history fan-out")
 	cmd.Flags().DurationVar(&opts.apkIndexRefresh, "apk-index-refresh", time.Hour, "how often to re-fetch the apk indexes served under /v1/apk/{name}/releases. 0 disables the background refresh (indexes are still loaded once at startup).")
+	cmd.Flags().StringSliceVar(&opts.apkRepositories, "apk-repository", nil, "apk repository root URL (repeatable, comma-separated). When set, overrides the default apk.cgr.dev/virtualapk.cgr.dev chain. Auth is picked up from HTTP_AUTH (format: basic:<host>:<user>:<password>).")
 	cmd.Flags().StringSliceVar(&opts.datasources, "datasource", []string{"repo", "apk"}, "select which datasources to expose (repo, apk). Repo-only skips the APK index fetch and apk.cgr.dev token exchange at startup.")
 	cmd.Flags().StringVar(&opts.logLevel, "log-level", "info", "log level: debug, info, warn, error")
 	cmd.Flags().StringVar(&opts.identity, "identity", "", "UIDP of an assumable Chainguard identity (enables identity auth)")
 	cmd.Flags().StringVar(&opts.identityToken, "identity-token", "", "OIDC token to assume the identity; either a file path or a literal JWT")
-	_ = cmd.MarkFlagRequired("org")
 
 	return cmd
 }
@@ -90,27 +97,21 @@ func runServe(parent context.Context, opts *serveOptions) error {
 		return err
 	}
 
-	cgOpts, authLbl, err := chainguardOptions(opts.identity, opts.identityToken)
-	if err != nil {
-		return err
-	}
-	cgOpts = append(cgOpts, chainguard.WithConcurrency(opts.concurrency))
-
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cg, err := chainguard.New(ctx, opts.org, cgOpts...)
-	if err != nil {
-		log.Error("initializing Chainguard client", "err", err)
-		return fmt.Errorf("initializing Chainguard client: %w", err)
-	}
-	defer func() {
-		if err := cg.Close(); err != nil {
-			log.Warn("closing Chainguard client", "err", err)
+	var cg *chainguard.Client
+	if enableRepo || (enableAPK && len(opts.apkRepositories) == 0) {
+		cg, err = newChainguardClient(ctx, log, opts.org, opts.identity, opts.identityToken, opts.concurrency)
+		if err != nil {
+			return err
 		}
-	}()
-
-	log.Info("resolved org", "org", opts.org, "uidp", cg.OrgUIDP, "minimumReleaseAge", opts.minimumReleaseAge, "auth", authLbl, "datasources", opts.datasources)
+		defer func() {
+			if err := cg.Close(); err != nil {
+				log.Warn("closing Chainguard client", "err", err)
+			}
+		}()
+	}
 
 	serverOpts := []server.Option{
 		server.WithMinimumReleaseAge(opts.minimumReleaseAge),
@@ -123,7 +124,10 @@ func runServe(parent context.Context, opts *serveOptions) error {
 	if enableAPK {
 		// APK repository chain feeding the /v1/apk/{name}/releases index.
 		const apkArch = "x86_64"
-		apkRepos := apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx))
+		apkRepos, err := resolveAPKRepositories(ctx, cg, opts.apkRepositories)
+		if err != nil {
+			return err
+		}
 
 		// Initial load blocks so /v1/apk/{name}/releases is warm as soon
 		// as the listener comes up; refresh continues in the background
@@ -137,7 +141,7 @@ func runServe(parent context.Context, opts *serveOptions) error {
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort("", strconv.Itoa(opts.port)),
-		Handler: server.New(cg, serverOpts...).Handler(),
+		Handler: server.New(serverOpts...).Handler(),
 		// Bound every part of a connection so a slow or stuck client can't
 		// pin a goroutine.
 		ReadHeaderTimeout: 5 * time.Second,

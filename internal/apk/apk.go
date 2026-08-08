@@ -5,6 +5,11 @@ package apk
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"os"
+	"path"
+	"strings"
 
 	"golang.org/x/oauth2"
 )
@@ -66,5 +71,77 @@ func DefaultRepositories(orgName, orgUIDP string, ts oauth2.TokenSource) []Repos
 		)
 	}
 	return repos
+}
+
+// RepositoriesFromURLs builds a Repository list from bare repo-root
+// URLs. Each URL must be http(s) with a non-empty host and no arch
+// suffix — the loader appends `/{arch}/APKINDEX.tar.gz` itself, so a
+// path like `.../x86_64` would break the fetch. Repository names are
+// derived from the URL: the last path segment if there is one, else
+// the host.
+//
+// Every returned Repository carries an AuthFunc that consults
+// HTTP_AUTH at request time; see HTTPAuthFor for the format. When the
+// env var is unset or targets a different host the AuthFunc returns
+// an empty credential, which the loader treats as "no auth".
+func RepositoriesFromURLs(urls []string) ([]Repository, error) {
+	if len(urls) == 0 {
+		return nil, nil
+	}
+	repos := make([]Repository, 0, len(urls))
+	for _, raw := range urls {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("apk-repository %q: %w", raw, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("apk-repository %q: scheme must be http or https", raw)
+		}
+		if u.Host == "" {
+			return nil, fmt.Errorf("apk-repository %q: missing host", raw)
+		}
+		trimmed := strings.TrimRight(u.Path, "/")
+		if last := path.Base(trimmed); last == "x86_64" || last == "aarch64" {
+			return nil, fmt.Errorf("apk-repository %q: pass the repo root, not the per-arch path (drop /%s)", raw, last)
+		}
+		name := path.Base(trimmed)
+		if name == "" || name == "." || name == "/" {
+			name = u.Host
+		}
+		repos = append(repos, Repository{
+			Name:    name,
+			BaseURL: strings.TrimRight(raw, "/"),
+			Auth:    HTTPAuthFor(u.Host),
+		})
+	}
+	return repos, nil
+}
+
+// HTTPAuthFor returns an AuthFunc that reads the HTTP_AUTH env var on
+// each call and returns a `user:password` credential when the env
+// var's host matches host. Format:
+//
+//	HTTP_AUTH=basic:<host>:<user>:<password>
+//
+// Only one credential entry per variable, only Basic auth, exact host
+// match. When the env var is unset or matches a different host the
+// returned AuthFunc yields an empty string, which the loader treats
+// as no auth.
+func HTTPAuthFor(host string) AuthFunc {
+	return func(_ context.Context) (string, error) {
+		env := os.Getenv("HTTP_AUTH")
+		if env == "" {
+			return "", nil
+		}
+		// SplitN keeps the password intact if it contains colons.
+		parts := strings.SplitN(env, ":", 4)
+		if len(parts) != 4 || parts[0] != "basic" {
+			return "", fmt.Errorf("HTTP_AUTH: expected basic:<host>:<user>:<password>")
+		}
+		if parts[1] != host {
+			return "", nil
+		}
+		return parts[2] + ":" + parts[3], nil
+	}
 }
 

@@ -326,6 +326,7 @@ func (b *fakeRepoBackend) ListTags(_ context.Context, repo string) ([]chainguard
 func (b *fakeRepoBackend) ListTagHistory(_ context.Context, _ string) ([]chainguard.TagHistory, error) {
 	return nil, nil
 }
+func (b *fakeRepoBackend) Ready(_ context.Context) error { return nil }
 
 func readResponse(t *testing.T, path string) datasource.Response {
 	t.Helper()

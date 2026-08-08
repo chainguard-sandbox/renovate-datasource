@@ -21,11 +21,14 @@ var repoNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/[a-z
 
 // RepoBackend is the subset of *chainguard.Client the repo source
 // needs. Keeping it narrow so tests can wire a fake without
-// implementing the whole gRPC surface.
+// implementing the whole gRPC surface. Ready surfaces auth-layer
+// readiness (e.g. token freshness) without a live API call so
+// /readyz can poll it on every request.
 type RepoBackend interface {
 	ListAllRepos(ctx context.Context) ([]string, error)
 	ListTags(ctx context.Context, repo string) ([]chainguard.Tag, error)
 	ListTagHistory(ctx context.Context, tagID string) ([]chainguard.TagHistory, error)
+	Ready(ctx context.Context) error
 }
 
 // RepoDatasource resolves repo paths to release lists via the platform
@@ -47,10 +50,10 @@ func (s *RepoDatasource) PackageNames(ctx context.Context) ([]string, error) {
 	return s.Backend.ListAllRepos(ctx)
 }
 
-// Ready always returns nil — probing the API on every /readyz would
-// be expensive. Backend auth readiness is checked separately by the
-// server's health-check hook.
-func (s *RepoDatasource) Ready(_ context.Context) error { return nil }
+// Ready delegates to the backend's cheap readiness check — typically
+// a token-freshness probe on *chainguard.Client. A live API call
+// would be too expensive to run per /readyz hit.
+func (s *RepoDatasource) Ready(ctx context.Context) error { return s.Backend.Ready(ctx) }
 
 // Releases returns the release list for the repo at packageName.
 // When before is non-zero, tags newer than that instant are rewound

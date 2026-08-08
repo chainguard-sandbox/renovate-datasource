@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
 	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
@@ -99,4 +101,33 @@ func chainguardOptions(identity, identityToken string) ([]chainguard.Option, str
 	default:
 		return nil, "chainctl", nil
 	}
+}
+
+// newChainguardClient initializes the Chainguard client and logs the
+// resolved org. --org must be non-empty.
+func newChainguardClient(ctx context.Context, log *slog.Logger, org, identity, identityToken string, concurrency int) (*chainguard.Client, error) {
+	if org == "" {
+		return nil, errors.New("--org is required")
+	}
+	cgOpts, authLbl, err := chainguardOptions(identity, identityToken)
+	if err != nil {
+		return nil, err
+	}
+	cgOpts = append(cgOpts, chainguard.WithConcurrency(concurrency))
+	cg, err := chainguard.New(ctx, org, cgOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("initializing Chainguard client: %w", err)
+	}
+	log.Info("resolved org", "org", org, "uidp", cg.OrgUIDP, "auth", authLbl)
+	return cg, nil
+}
+
+// resolveAPKRepositories picks between user-supplied mirror URLs and
+// the default Chainguard chain. cg may be nil only when
+// apkRepositoryURLs is non-empty.
+func resolveAPKRepositories(ctx context.Context, cg *chainguard.Client, apkRepositoryURLs []string) ([]apk.Repository, error) {
+	if len(apkRepositoryURLs) > 0 {
+		return apk.RepositoriesFromURLs(apkRepositoryURLs)
+	}
+	return apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx)), nil
 }

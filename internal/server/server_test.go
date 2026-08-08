@@ -17,12 +17,6 @@ import (
 
 // ─── shared test fixtures ────────────────────────────────────────────
 
-// readyBackend implements Readier for tests. Zero-value returns nil
-// (ready); set err to simulate a not-ready backend.
-type readyBackend struct{ err error }
-
-func (r *readyBackend) Ready(context.Context) error { return r.err }
-
 // stubReleasesBackend implements datasource.RepoBackend for tests. It
 // serves a fixed tag list and records how many times ListTagHistory
 // is called — an observable proxy for whether the minimumReleaseAge
@@ -32,6 +26,7 @@ type stubReleasesBackend struct {
 	tags      []chainguard.Tag
 	histCalls atomic.Int32
 	lastRepo  atomic.Value // string
+	readyErr  error
 }
 
 func (b *stubReleasesBackend) ListAllRepos(_ context.Context) ([]string, error) {
@@ -45,6 +40,7 @@ func (b *stubReleasesBackend) ListTagHistory(_ context.Context, _ string) ([]cha
 	b.histCalls.Add(1)
 	return nil, nil
 }
+func (b *stubReleasesBackend) Ready(_ context.Context) error { return b.readyErr }
 
 // buildAPKDatasource stamps a synthetic index into an APKDatasource so
 // handler tests can exercise minimumReleaseAge / sorting / 404s
@@ -58,7 +54,7 @@ func buildAPKDatasource(entries map[string][]apk.PackageVersion) *datasource.APK
 // serverWithFixedNow builds a Server with the given options and pins
 // its clock to frozen so minimumReleaseAge cutoffs are deterministic.
 func serverWithFixedNow(frozen time.Time, opts ...Option) *Server {
-	srv := New(nil, opts...)
+	srv := New(opts...)
 	srv.now = func() time.Time { return frozen }
 	return srv
 }
@@ -66,7 +62,7 @@ func serverWithFixedNow(frozen time.Time, opts ...Option) *Server {
 // ─── /readyz ─────────────────────────────────────────────────────────
 
 func TestReadyz_NoAPKDatasource(t *testing.T) {
-	h := New(&readyBackend{}).Handler()
+	h := New().Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -82,7 +78,7 @@ func TestReadyz_APKDatasourceEmpty(t *testing.T) {
 	// returned an empty store because the initial load failed. APKDatasource.Ready
 	// surfaces that via its Len() == 0 check.
 	empty := datasource.NewAPKDatasource(apk.NewIndexStore())
-	h := New(&readyBackend{}, WithAPKDatasource(empty)).Handler()
+	h := New(WithAPKDatasource(empty)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -96,7 +92,7 @@ func TestReadyz_APKDatasourceEmpty(t *testing.T) {
 func TestReadyz_APKDatasourcePopulated(t *testing.T) {
 	store := apk.NewIndexStore()
 	store.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1.0.0"}}})
-	h := New(&readyBackend{}, WithAPKDatasource(datasource.NewAPKDatasource(store))).Handler()
+	h := New(WithAPKDatasource(datasource.NewAPKDatasource(store))).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -156,7 +152,7 @@ func TestDatasource_RouteRegistration(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h := New(&readyBackend{}, tc.opts...).Handler()
+			h := New(tc.opts...).Handler()
 
 			for path, want := range map[string]int{
 				"/v1/repo/foo/releases": tc.wantRepo,
@@ -214,7 +210,7 @@ func TestHandleReleases_MultiSegmentPath(t *testing.T) {
 			backend := &stubReleasesBackend{tags: []chainguard.Tag{
 				{ID: "1", Name: "1", LastUpdated: time.Now().Add(-30 * 24 * time.Hour), Digest: "sha256:x"},
 			}}
-			h := New(&readyBackend{}, WithRepoDatasource(datasource.NewRepoDatasource(backend, 0))).Handler()
+			h := New(WithRepoDatasource(datasource.NewRepoDatasource(backend, 0))).Handler()
 
 			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
 			rec := httptest.NewRecorder()
@@ -295,7 +291,7 @@ func TestHandleReleasesMinimumReleaseAgeQueryParam(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &stubReleasesBackend{tags: []chainguard.Tag{freshTag}}
-			h := New(&readyBackend{},
+			h := New(
 				WithMinimumReleaseAge(tc.serverMinimumReleaseAge),
 				WithRepoDatasource(datasource.NewRepoDatasource(backend, 0)),
 			).Handler()
@@ -326,7 +322,7 @@ func TestHandleReleasesMinimumReleaseAgeQueryParam(t *testing.T) {
 // ─── /v1/apk/{name}/releases ─────────────────────────────────────────
 
 func TestHandleAPKReleases_UnknownPackage(t *testing.T) {
-	h := New(nil, WithAPKDatasource(buildAPKDatasource(map[string][]apk.PackageVersion{
+	h := New(WithAPKDatasource(buildAPKDatasource(map[string][]apk.PackageVersion{
 		"known": {{Version: "1.0.0"}},
 	}))).Handler()
 
@@ -343,7 +339,7 @@ func TestHandleAPKReleases_NoDatasource(t *testing.T) {
 	// No APK source attached → the route isn't registered → 404.
 	// Callers relying on 501 to detect intentional disablement should
 	// probe /readyz instead.
-	h := New(nil).Handler()
+	h := New().Handler()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases", nil)
@@ -419,7 +415,7 @@ func TestHandleAPKReleases_NoMinimumReleaseAgeReturnsAll(t *testing.T) {
 }
 
 func TestHandleAPKReleases_BadMinimumReleaseAge(t *testing.T) {
-	h := New(nil, WithAPKDatasource(buildAPKDatasource(map[string][]apk.PackageVersion{
+	h := New(WithAPKDatasource(buildAPKDatasource(map[string][]apk.PackageVersion{
 		"foo": {{Version: "1.0.0-r0"}},
 	}))).Handler()
 
@@ -433,7 +429,7 @@ func TestHandleAPKReleases_BadMinimumReleaseAge(t *testing.T) {
 }
 
 func TestHandleAPKReleases_MalformedName(t *testing.T) {
-	h := New(nil, WithAPKDatasource(buildAPKDatasource(nil))).Handler()
+	h := New(WithAPKDatasource(buildAPKDatasource(nil))).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/.escape/releases", nil)
 	rec := httptest.NewRecorder()
@@ -451,7 +447,7 @@ func TestHandleAPKReleases_PrefixedProvidesName(t *testing.T) {
 	ds := buildAPKDatasource(map[string][]apk.PackageVersion{
 		"cmd:node": {{Version: "24.14.0-r0", Timestamp: time.Unix(1_700_000_000, 0).UTC()}},
 	})
-	h := New(nil, WithAPKDatasource(ds)).Handler()
+	h := New(WithAPKDatasource(ds)).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/apk/cmd:node/releases", nil)
 	rec := httptest.NewRecorder()

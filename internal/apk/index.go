@@ -264,7 +264,9 @@ func (l *IndexLoader) loadOne(ctx context.Context, repo Repository, indexURL str
 		if err != nil {
 			return 0, fmt.Errorf("resolving auth: %w", err)
 		}
-		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cred)))
+		if cred != "" {
+			req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cred)))
+		}
 	}
 	resp, err := l.client.Do(req)
 	if err != nil {

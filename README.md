@@ -251,8 +251,8 @@ results entirely.
 
 ### APKs
 
-The datasource pulls the APKINDEX for each of the organization's repositories
-at startup and regularly refreshes it according to the value of
+By default, the datasource pulls the APKINDEX for each of the organization's
+repositories at startup and regularly refreshes it according to the value of
 `--apk-index-refresh` (default `1h`).
 
 ```
@@ -261,7 +261,33 @@ https://virtualapk.cgr.dev/<org-id>/chainguard
 https://virtualapk.cgr.dev/<org-id>/extra-packages
 ```
 
-It uses the `t:` field in the index as the `releaseTimestamp` and omits versions
+Access to `apk.cgr.dev` requires that you have logged in with
+`chainctl auth login --audience=apk.cgr.dev` or are using an assumable identity and passing
+`--identity` and `--identity-token` when you run the datasource.
+
+Use `--apk-repository=<url>` to point at your own mirrors
+or proxies instead.
+
+```
+# If auth is required, set it via the HTTP_AUTH environment variable
+export HTTP_AUTH="basic:mirror.example:<user>:<password>"
+
+./renovate-datasource serve --datasource=apk \
+    --apk-repository=https://mirror.example/apk/chainguard \
+    --apk-repository=https://mirror.example/apk/extra-packages
+```
+
+You can also use this to point only at your public `virtualapk.cgr.dev` repos,
+excluding the private. This removes the requirement to authenticate with
+Chainguard at all, as both URLs are public.
+
+```
+./renovate-datasource serve --datasource=apk \
+    --apk-repository=https://virtualapk.cgr.dev/<org-id>/chainguard \
+    --apk-repository=https://virtualapk.cgr.dev/<org-id>/extra-packages
+```
+
+The datasource uses the `t:` field in the index as the `releaseTimestamp` and omits versions
 where the timestamp falls inside the `minimumReleaseAge` window.
 
 ```json
