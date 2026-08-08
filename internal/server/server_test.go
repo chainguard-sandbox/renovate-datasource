@@ -364,7 +364,8 @@ func TestHandleAPKReleases_MinimumReleaseAgeFilterAndSort(t *testing.T) {
 			{Version: "1.1.0-r0", Timestamp: day(15)},
 			// Within a 7d minimumReleaseAge, this one is too fresh and should be filtered out.
 			{Version: "1.2.0-r0", Timestamp: day(1)},
-			// Zero timestamp — treated as old enough and always included.
+			// Zero timestamp — filtered when a cutoff is set, because we
+			// can't prove it sits outside the window.
 			{Version: "0.9.0-r0", Timestamp: time.Time{}},
 		},
 	})
@@ -381,9 +382,8 @@ func TestHandleAPKReleases_MinimumReleaseAgeFilterAndSort(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	// Expect 1.2.0-r0 filtered out; remaining three ordered newest-first
-	// (zero-timestamp last since Time{} sorts as the oldest possible time).
-	wantVersions := []string{"1.1.0-r0", "1.0.0-r0", "0.9.0-r0"}
+	// Expect 1.2.0-r0 and 0.9.0-r0 filtered out; remaining two ordered newest-first.
+	wantVersions := []string{"1.1.0-r0", "1.0.0-r0"}
 	if len(resp.Releases) != len(wantVersions) {
 		t.Fatalf("got %d releases, want %d (%+v)", len(resp.Releases), len(wantVersions), resp.Releases)
 	}

@@ -96,6 +96,8 @@ func tagsAsReleases(tags []chainguard.Tag) []Release {
 // of tags subject to a minimumReleaseAge cutoff.
 //
 // For each tag:
+//   - if the tag has no LastUpdated, omit it (we can't prove it sits
+//     outside the window);
 //   - if the tag's current digest is on or before the cutoff, emit it as-is;
 //   - if it's after the cutoff, walk history and emit the most recent entry
 //     whose UpdateTimestamp is on or before the cutoff;
@@ -112,6 +114,9 @@ func applyMinimumReleaseAge(ctx context.Context, tags []chainguard.Tag, cutoff t
 	var needHistory []int
 
 	for i, t := range tags {
+		if t.LastUpdated.IsZero() {
+			continue
+		}
 		if !t.LastUpdated.After(cutoff) {
 			slots[i] = &Release{
 				Version:          t.Name,

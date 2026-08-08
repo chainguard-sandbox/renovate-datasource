@@ -83,6 +83,13 @@ func TestApplyMinimumReleaseAge(t *testing.T) {
 			want: []Release{},
 		},
 		{
+			name: "tag with zero LastUpdated is omitted (can't prove it sits outside the window)",
+			tags: []chainguard.Tag{
+				{ID: "unknown", Name: "unknown", LastUpdated: time.Time{}, Digest: "sha256:unknown"},
+			},
+			want: []Release{},
+		},
+		{
 			name: "mixed: one passes through, one rewinds, one drops",
 			tags: []chainguard.Tag{
 				{ID: "stable", Name: "stable", LastUpdated: day(15), Digest: "sha256:stable"},

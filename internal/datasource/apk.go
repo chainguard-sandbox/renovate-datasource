@@ -61,10 +61,11 @@ func (s *APKDatasource) Releases(_ context.Context, packageName string, before t
 	}
 	out := make([]Release, 0, len(entries))
 	for _, e := range entries {
-		// Cutoff filter: skip releases whose timestamp is after the
-		// cutoff. Zero-timestamp entries always pass — we have no
-		// signal to hold them back.
-		if !before.IsZero() && !e.Timestamp.IsZero() && e.Timestamp.After(before) {
+		// When a minimumReleaseAge cutoff is set, drop entries we
+		// can't prove sit outside the window: anything with a
+		// timestamp after the cutoff, and anything with no timestamp
+		// at all (we have no evidence it isn't fresh).
+		if !before.IsZero() && (e.Timestamp.IsZero() || e.Timestamp.After(before)) {
 			continue
 		}
 		out = append(out, Release{

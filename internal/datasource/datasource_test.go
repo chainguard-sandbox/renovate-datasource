@@ -20,7 +20,7 @@ func TestAPKDatasource_ReleasesFiltersAndSorts(t *testing.T) {
 			{Version: "8.20.0-r0", Timestamp: day(30)},
 			{Version: "8.21.0-r0", Timestamp: day(15)},
 			{Version: "8.22.0-r0", Timestamp: day(1)},     // newer than 7d cutoff — filtered
-			{Version: "0.9.0-r0", Timestamp: time.Time{}}, // zero-ts always passes
+			{Version: "0.9.0-r0", Timestamp: time.Time{}}, // zero-ts — filtered (can't prove it's outside the window)
 		},
 	})
 	ds := NewAPKDatasource(store)
@@ -30,7 +30,7 @@ func TestAPKDatasource_ReleasesFiltersAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Releases: %v", err)
 	}
-	wantVersions := []string{"8.21.0-r0", "8.20.0-r0", "0.9.0-r0"}
+	wantVersions := []string{"8.21.0-r0", "8.20.0-r0"}
 	if len(got) != len(wantVersions) {
 		t.Fatalf("len(got)=%d want %d (%+v)", len(got), len(wantVersions), got)
 	}
