@@ -351,7 +351,11 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 		case 'V':
 			cur.Version = val
 		case 't':
-			if secs, err := strconv.ParseInt(val, 10, 64); err == nil {
+			// `t:0` (Unix epoch) is what apk-tools emits when no build
+			// timestamp is available. Treat it as absent so downstream
+			// filters can distinguish "no signal" from a real
+			// timestamp.
+			if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs != 0 {
 				cur.Timestamp = time.Unix(secs, 0).UTC()
 			}
 		case 'p':
