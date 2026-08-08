@@ -190,7 +190,7 @@ func TestDedupe(t *testing.T) {
 	t1 := time.Unix(1_700_000_100, 0).UTC() // newer
 
 	merged := &indexData{
-		releases: map[string][]Release{
+		releases: map[string][]PackageVersion{
 			// Same version across two sources with different timestamps →
 			// the later timestamp wins.
 			"git": {
@@ -214,7 +214,7 @@ func TestDedupe(t *testing.T) {
 	if got := len(merged.releases["git"]); got != 2 {
 		t.Errorf("git deduped len = %d, want 2 (%+v)", got, merged.releases["git"])
 	}
-	var gotGitR3 Release
+	var gotGitR3 PackageVersion
 	for _, r := range merged.releases["git"] {
 		if r.Version == "2.55.0-r3" {
 			gotGitR3 = r
@@ -260,7 +260,7 @@ func TestIndexStore_GetAndReplace(t *testing.T) {
 	if got := s.Get("missing"); got != nil {
 		t.Errorf("Get on empty store = %v, want nil", got)
 	}
-	s.Replace(map[string][]Release{
+	s.Replace(map[string][]PackageVersion{
 		"foo": {{Version: "1", Timestamp: time.Unix(1, 0)}},
 	})
 	got := s.Get("foo")

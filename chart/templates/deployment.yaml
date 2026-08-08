@@ -23,6 +23,7 @@ spec:
           image: {{ include "renovate-datasource.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
+            - serve
             - --org={{ required "org is required" .Values.org }}
             - --identity={{ required "identity is required" .Values.identity }}
             - --identity-token={{ .Values.identityToken.mountPath }}/token

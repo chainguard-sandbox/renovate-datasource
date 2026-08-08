@@ -42,19 +42,30 @@ docker build -t renovate-datasource:dev .
 
 ## Run
 
-### Locally
+### HTTP Server
 
-Run the service locally and reuse the local credentials provided by `chainctl`:
+The `serve` subcommand hosts the datasource on a local webserver.
 
 ```
-# Login to Chainguard
+# Login to Chainguard - the datasource will reuse these credentials
 chainctl auth login
 
-# Run the service, serves both /v1/repo/ and /v1/apk/
-./renovate-datasource --org=my.org.com
+# Serves both /v1/repo/{packageName}/releases and /v1/apk/{packageName}/releases
+./renovate-datasource serve --org=my.org.com
 
-# Use --datasource to only serve one of the datasources (apk or repo)
-./renovate-datasource --org=my.org.com --datasource apk
+# Use --datasource to only serve one of the datasources
+./renovate-datasource serve --org=my.org.com --datasource apk
+```
+
+You can also use an [assumable
+identity](https://edu.chainguard.dev/platform/administration/assumable-ids/) to
+authenticate with an OIDC token from a non-interactive workload like a
+Kubernetes pod.
+
+```
+./renovate-datasource serve --org=my.org.com \
+    --identity=<identity-uidp> \
+    --identity-token=/path/to/token
 ```
 
 The datasource endpoints are then a plain HTTP GET away:
@@ -83,6 +94,62 @@ datasource](https://docs.renovatebot.com/modules/datasource/custom/):
   "customDatasources": {
     "chainguard-apk": {
       "defaultRegistryUrlTemplate": "http://localhost:8080/v1/apk/{{packageName}}/releases",
+      "format": "json"
+    }
+  }
+}
+```
+
+### Snapshot
+
+The `snapshot` command writes the response for every package to disk so that it
+can be served by any static webserver. 
+
+This is a one-shot command that you would typically run on a schedule, copying
+the output to wherever you are hosting the datasource.
+
+```
+# Write the full snapshot to /tmp/snap
+./renovate-datasource snapshot --org=my.org.com -d /tmp/snap
+
+# Apply a cooldown to the snapshot
+./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
+    --cooldown=168h
+
+# Only write the snapshot for one of the datasources (repo, apk)
+./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
+    --datasource apk
+
+# Exclude versions older than a specific duration, which limits the size of the
+# snapshot.
+./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
+    --max-release-age=4380h
+```
+
+Layout:
+
+```
+/tmp/snap/
+├── apk/
+│   ├── cmd:node/releases.json                     # prefixed capability
+│   ├── curl/releases.json                         # apk package
+│   └── nodejs/releases.json                       # unprefixed provider
+└── repo/
+    ├── charts/
+    │   └── nginx/releases.json                    # helm chart
+    ├── iamguarded-charts/
+    │   └── postgresql/releases.json               # iamguarded helm chart
+    └── python/releases.json                       # image
+```
+
+Point Renovate at the hosted files via a [custom
+datasource](https://docs.renovatebot.com/modules/datasource/custom/):
+
+```json
+{
+  "customDatasources": {
+    "chainguard-apk": {
+      "defaultRegistryUrlTemplate": "http://<static-host>/apk/{{packageName}}/releases.json",
       "format": "json"
     }
   }

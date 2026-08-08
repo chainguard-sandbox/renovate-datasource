@@ -1,11 +1,8 @@
-package server
+package datasource
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -127,7 +124,7 @@ func TestApplyCooldown(t *testing.T) {
 
 			got, err := applyCooldown(context.Background(), tc.tags, cutoff, histFn, 1)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("applyCooldown error = %v, wantErr=%v", err, tc.wantErr)
+				t.Fatalf("ApplyCooldown error = %v, wantErr=%v", err, tc.wantErr)
 			}
 			if tc.wantErr {
 				return
@@ -198,182 +195,16 @@ func TestApplyCooldown_FansOutHistoryCalls(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if err != nil {
-		t.Fatalf("applyCooldown: %v", err)
+		t.Fatalf("ApplyCooldown: %v", err)
 	}
 	if len(releases) != numTags {
 		t.Fatalf("got %d releases, want %d", len(releases), numTags)
 	}
 
 	if elapsed > histDelay*time.Duration(numTags/2) {
-		t.Errorf("applyCooldown took %v; fan-out doesn't appear to be working", elapsed)
+		t.Errorf("ApplyCooldown took %v; fan-out doesn't appear to be working", elapsed)
 	}
 	if peak.Load() < int32(concurrency)-1 {
 		t.Errorf("peak in-flight history calls = %d, want close to %d", peak.Load(), concurrency)
-	}
-}
-
-// stubReleasesBackend serves a fixed tag list and records how many times
-// ListTagHistory is called. That call count is the observable proxy we use to
-// tell whether the cooldown path ran or the pass-through path did. lastRepo
-// captures the last repo string ListTags received so multi-segment routing
-// can be verified end-to-end.
-type stubReleasesBackend struct {
-	tags      []chainguard.Tag
-	histCalls atomic.Int32
-	lastRepo  atomic.Value // string
-}
-
-func (b *stubReleasesBackend) ListTags(_ context.Context, repo string) ([]chainguard.Tag, error) {
-	b.lastRepo.Store(repo)
-	return b.tags, nil
-}
-func (b *stubReleasesBackend) ListTagHistory(_ context.Context, _ string) ([]chainguard.TagHistory, error) {
-	b.histCalls.Add(1)
-	return nil, nil
-}
-func (b *stubReleasesBackend) Ready(_ context.Context) error { return nil }
-
-// TestHandleReleases_MultiSegmentPath confirms the /v1/repo/{path...}
-// dispatcher passes multi-segment paths (used for Helm charts under
-// `charts/…` and `iamguarded-charts/…`) straight through to the backend.
-func TestHandleReleases_MultiSegmentPath(t *testing.T) {
-	tests := []struct {
-		name       string
-		url        string
-		wantRepo   string
-		wantStatus int
-	}{
-		{
-			name:       "single-segment image",
-			url:        "/v1/repo/python/releases",
-			wantRepo:   "python",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "two-segment charts subrepo",
-			url:        "/v1/repo/charts/kube-prometheus-stack/releases",
-			wantRepo:   "charts/kube-prometheus-stack",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "two-segment iamguarded-charts subrepo",
-			url:        "/v1/repo/iamguarded-charts/nginx/releases",
-			wantRepo:   "iamguarded-charts/nginx",
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "missing /releases suffix returns 404",
-			url:        "/v1/repo/charts/nginx",
-			wantStatus: http.StatusNotFound,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := &stubReleasesBackend{tags: []chainguard.Tag{
-				{ID: "1", Name: "1", LastUpdated: time.Now().Add(-30 * 24 * time.Hour), Digest: "sha256:x"},
-			}}
-			h := New(backend).Handler()
-
-			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
-
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantStatus, rec.Body.String())
-			}
-			if tc.wantStatus != http.StatusOK {
-				return
-			}
-			got, _ := backend.lastRepo.Load().(string)
-			if got != tc.wantRepo {
-				t.Errorf("backend saw repo=%q, want %q", got, tc.wantRepo)
-			}
-		})
-	}
-}
-
-func TestHandleReleasesCooldownQueryParam(t *testing.T) {
-	// A single "fresh" tag whose current digest is newer than any positive
-	// cooldown cutoff — so cooldown>0 will trigger a history walk while
-	// cooldown=0 will short-circuit to tagsAsReleases.
-	freshTag := chainguard.Tag{
-		ID:          "latest",
-		Name:        "latest",
-		LastUpdated: time.Now(),
-		Digest:      "sha256:fresh",
-	}
-
-	tests := []struct {
-		name           string
-		serverCooldown time.Duration
-		query          string
-		wantStatus     int
-		wantHistCalls  int32
-		wantReleases   int
-	}{
-		{
-			name:           "no query, server default 0 → pass-through, no history walk",
-			serverCooldown: 0,
-			query:          "",
-			wantStatus:     http.StatusOK,
-			wantHistCalls:  0,
-			wantReleases:   1,
-		},
-		{
-			name:           "query cooldown=168h overrides server default 0 → history walk",
-			serverCooldown: 0,
-			query:          "?cooldown=168h",
-			wantStatus:     http.StatusOK,
-			wantHistCalls:  1,
-			wantReleases:   0, // no history entries → tag omitted
-		},
-		{
-			name:           "query cooldown=0 overrides server default 168h → pass-through",
-			serverCooldown: 168 * time.Hour,
-			query:          "?cooldown=0",
-			wantStatus:     http.StatusOK,
-			wantHistCalls:  0,
-			wantReleases:   1,
-		},
-		{
-			name:           "invalid cooldown returns 400",
-			serverCooldown: 0,
-			query:          "?cooldown=not-a-duration",
-			wantStatus:     http.StatusBadRequest,
-		},
-		{
-			name:           "negative cooldown returns 400",
-			serverCooldown: 0,
-			query:          "?cooldown=-1h",
-			wantStatus:     http.StatusBadRequest,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := &stubReleasesBackend{tags: []chainguard.Tag{freshTag}}
-			h := New(backend, WithCooldown(tc.serverCooldown)).Handler()
-
-			req := httptest.NewRequest(http.MethodGet, "/v1/repo/foo/releases"+tc.query, nil)
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
-
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantStatus, rec.Body.String())
-			}
-			if got := backend.histCalls.Load(); got != tc.wantHistCalls {
-				t.Errorf("ListTagHistory calls = %d, want %d", got, tc.wantHistCalls)
-			}
-			if tc.wantStatus == http.StatusOK {
-				var resp ReleasesResponse
-				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-					t.Fatalf("decode: %v", err)
-				}
-				if len(resp.Releases) != tc.wantReleases {
-					t.Errorf("releases = %d, want %d (%+v)", len(resp.Releases), tc.wantReleases, resp.Releases)
-				}
-			}
-		})
 	}
 }

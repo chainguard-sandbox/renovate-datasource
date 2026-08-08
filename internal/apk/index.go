@@ -12,14 +12,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Release is one version of a package as it appears in an APKINDEX.
-type Release struct {
+// PackageVersion is one version of a package as it appears in an APKINDEX.
+type PackageVersion struct {
 	// Version is the raw apk version, e.g. "1.2.3-r0".
 	Version string
 	// Timestamp is the package's build/commit time (`t:` field). Zero
@@ -31,7 +32,7 @@ type Release struct {
 // for concurrent reads; a single writer at a time via Replace.
 type IndexStore struct {
 	mu       sync.RWMutex
-	releases map[string][]Release
+	releases map[string][]PackageVersion
 }
 
 // NewIndexStore returns an empty IndexStore. Get on an empty store
@@ -41,7 +42,7 @@ type IndexStore struct {
 // tests and any manually-populated fixtures.
 func NewIndexStore() *IndexStore {
 	return &IndexStore{
-		releases: map[string][]Release{},
+		releases: map[string][]PackageVersion{},
 	}
 }
 
@@ -64,14 +65,14 @@ func NewIndexStoreWithRefresh(ctx context.Context, arch string, repos []Reposito
 // Get returns the releases for name, or nil if the package isn't known.
 // The returned slice is a shallow copy so callers can sort/filter
 // without holding the lock.
-func (s *IndexStore) Get(name string) []Release {
+func (s *IndexStore) Get(name string) []PackageVersion {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rs := s.releases[name]
 	if len(rs) == 0 {
 		return nil
 	}
-	out := make([]Release, len(rs))
+	out := make([]PackageVersion, len(rs))
 	copy(out, rs)
 	return out
 }
@@ -84,10 +85,24 @@ func (s *IndexStore) Len() int {
 	return len(s.releases)
 }
 
+// All returns every known package name, sorted. Callers iterate the
+// result and pass each name back through Get to fetch the releases.
+// The snapshot generator uses this to enumerate every feed to write.
+func (s *IndexStore) All() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, 0, len(s.releases))
+	for name := range s.releases {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Replace atomically swaps the store's contents. IndexLoader calls
 // this once per refresh with the fully-rebuilt map so readers never
 // observe a partial update.
-func (s *IndexStore) Replace(releases map[string][]Release) {
+func (s *IndexStore) Replace(releases map[string][]PackageVersion) {
 	s.mu.Lock()
 	s.releases = releases
 	s.mu.Unlock()
@@ -146,12 +161,12 @@ func newIndexHTTPClient() *http.Client {
 // into. Wrapping the map in a struct keeps room for future scratch state
 // (e.g. per-source counters) without threading extra arguments.
 type indexData struct {
-	releases map[string][]Release
+	releases map[string][]PackageVersion
 }
 
 func newIndexData() *indexData {
 	return &indexData{
-		releases: map[string][]Release{},
+		releases: map[string][]PackageVersion{},
 	}
 }
 
@@ -221,7 +236,7 @@ func dedupe(d *indexData) {
 		if len(releases) < 2 {
 			continue
 		}
-		byVersion := make(map[string]Release, len(releases))
+		byVersion := make(map[string]PackageVersion, len(releases))
 		for _, r := range releases {
 			existing, ok := byVersion[r.Version]
 			if !ok || r.Timestamp.After(existing.Timestamp) {
@@ -231,7 +246,7 @@ func dedupe(d *indexData) {
 		if len(byVersion) == len(releases) {
 			continue // nothing to collapse
 		}
-		out := make([]Release, 0, len(byVersion))
+		out := make([]PackageVersion, 0, len(byVersion))
 		for _, r := range byVersion {
 			out = append(out, r)
 		}
@@ -303,7 +318,7 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 	// default 64 KiB so long D:/p: lines don't overflow.
 	br.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
-	var cur Release
+	var cur PackageVersion
 	var name string
 	var provides string
 	added := 0
@@ -314,7 +329,7 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 			added++
 			addProvides(provides, cur.Timestamp, out)
 		}
-		cur = Release{}
+		cur = PackageVersion{}
 		name = ""
 		provides = ""
 	}
@@ -351,7 +366,7 @@ func parseAPKINDEX(r io.Reader, out *indexData) (int, error) {
 	return added, nil
 }
 
-// addProvides emits a Release for each `p:` entry on a package record
+// addProvides emits a PackageVersion for each `p:` entry on a package record
 // so pins like `apk add nodejs=24.14.0-r0` (which resolve via
 // `nodejs-24`'s `p:nodejs=24.14.0-r0`) return a real releases list from
 // the datasource. Prefixed capabilities (`cmd:foo`, `so:libbar.so.1`,
@@ -380,6 +395,6 @@ func addProvides(list string, ts time.Time, out *indexData) {
 		if ver == "0" {
 			continue
 		}
-		out.releases[name] = append(out.releases[name], Release{Version: ver, Timestamp: ts})
+		out.releases[name] = append(out.releases[name], PackageVersion{Version: ver, Timestamp: ts})
 	}
 }

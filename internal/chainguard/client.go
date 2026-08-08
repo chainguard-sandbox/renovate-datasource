@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"chainguard.dev/sdk/auth"
@@ -131,6 +132,9 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 	}
 	target, dialOpts := delegate.GRPCOptions(*uri)
 	dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(oauth.TokenSource{TokenSource: ts}))
+	if o.concurrency > 0 {
+		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(rateLimitInterceptor(o.concurrency)))
+	}
 
 	conn, err := grpc.NewClient(target, dialOpts...)
 	if err != nil {
@@ -272,6 +276,58 @@ func (c *Client) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 		})
 	}
 	return out, nil
+}
+
+// ListAllRepos enumerates every repo in the configured org, walking
+// subgroups recursively. Each returned entry is a slash-joined path
+// relative to the org (e.g. "python", "charts/nginx",
+// "iamguarded-charts/postgresql") — the same shape the /v1/repo
+// endpoint accepts.
+//
+// The walk is sequential: one IAM.Groups().List per group plus one
+// Registry().ListRepos per group. That's fine at typical org sizes
+// (a few hundred repos, a handful of subgroups). If throughput ever
+// matters, subgroup traversal can fan out via an errgroup.
+func (c *Client) ListAllRepos(ctx context.Context) ([]string, error) {
+	var out []string
+	if err := c.walkRepos(ctx, c.OrgUIDP, "", &out); err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (c *Client) walkRepos(ctx context.Context, parentUIDP, prefix string, out *[]string) error {
+	repoResp, err := c.registry.Registry().ListRepos(ctx, &registry.RepoFilter{
+		Uidp: &common.UIDPFilter{ChildrenOf: parentUIDP},
+	})
+	if err != nil {
+		return fmt.Errorf("listing repos under %s: %w", parentUIDP, err)
+	}
+	for _, r := range repoResp.GetItems() {
+		name := r.GetName()
+		if prefix != "" {
+			name = prefix + "/" + name
+		}
+		*out = append(*out, name)
+	}
+
+	groupResp, err := c.iam.Groups().List(ctx, &iam.GroupFilter{
+		Uidp: &common.UIDPFilter{ChildrenOf: parentUIDP},
+	})
+	if err != nil {
+		return fmt.Errorf("listing subgroups under %s: %w", parentUIDP, err)
+	}
+	for _, g := range groupResp.GetItems() {
+		childPrefix := g.GetName()
+		if prefix != "" {
+			childPrefix = prefix + "/" + childPrefix
+		}
+		if err := c.walkRepos(ctx, g.GetId(), childPrefix, out); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListTagHistory returns historical iterations of the tag identified by tagID

@@ -1,82 +1,60 @@
+// Package server exposes the /releases endpoints Renovate consumes
+// as a custom datasource. Datasources plug in via Options; the mux
+// dispatches everything under /v1/repo and /v1/apk to a single
+// shared handler body.
 package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
-	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
-	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
+	"github.com/chainguard-sandbox/renovate-datasource/internal/datasource"
 )
 
-// Conservative repo-name pattern: lowercase, digits, dashes, underscores,
-// dots, and single internal slashes. Multi-segment paths are how the
-// datasource serves subrepos — e.g. `charts/nginx` and
-// `iamguarded-charts/postgresql` resolve to Helm charts under those
-// subgroups. Blocks `..`, leading dots, query strings.
-var repoNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*$`)
+// maxCooldown bounds the ?cooldown= override at one year. Beyond
+// that we assume a malformed request rather than intent.
+const maxCooldown = 365 * 24 * time.Hour
 
-// apkProvidesNamePattern accepts apk package names, including apk
-// capability prefixes emitted by APKINDEX (`cmd:node`, `so:libssl.so.3`,
-// `pc:openssl`, `py3.14:setuptools`). Bounded length to keep URL /
-// filesystem handling predictable.
-var apkProvidesNamePattern = regexp.MustCompile(`^(?:[a-z][a-z0-9.]*:)?[a-z0-9][a-z0-9._+-]{0,127}$`)
-
-// validateAPKProvidesName writes a 400 to w and returns false when
-// name doesn't match apkProvidesNamePattern.
-func validateAPKProvidesName(w http.ResponseWriter, name string) bool {
-	if apkProvidesNamePattern.MatchString(name) {
-		return true
-	}
-	writeAPIError(w, http.StatusBadRequest, "The apk package name isn't well-formed.")
-	return false
-}
-
-// Backend is the subset of *chainguard.Client the HTTP layer depends on for
-// platform-API calls (listing tags + history, readiness).
-type Backend interface {
-	ListTags(ctx context.Context, repo string) ([]chainguard.Tag, error)
-	ListTagHistory(ctx context.Context, tagID string) ([]chainguard.TagHistory, error)
+// Readier reports auth-layer readiness. Typically satisfied by
+// *chainguard.Client so /readyz can surface a stale chainctl token
+// or an unreadable identity-token file.
+type Readier interface {
 	Ready(ctx context.Context) error
 }
 
 type Server struct {
-	backend            Backend
-	apkIndex           *apk.IndexStore
-	cooldown           time.Duration
-	historyConcurrency int
-	enableRepo         bool
-	enableAPK          bool
-	now                func() time.Time
-	log                *slog.Logger
+	readier    Readier
+	repoDatasource datasource.Datasource
+	apkDatasource  datasource.Datasource
+	cooldown   time.Duration
+	now        func() time.Time
+	log        *slog.Logger
 }
 
-// New builds a Server. backend handles platform-API calls used by every
-// /releases endpoint.
-func New(backend Backend, opts ...Option) *Server {
+// New builds a Server. readier drives the /readyz auth check.
+// Datasources are attached via WithRepoDatasource / WithAPKDatasource — a datasource
+// is required for its endpoint to be registered.
+func New(readier Readier, opts ...Option) *Server {
 	o := options{
-		cooldown:           defaultCooldown,
-		historyConcurrency: defaultHistoryConcurrency,
-		enableRepo:         true,
-		enableAPK:          true,
-		log:                slog.Default(),
-		now:                time.Now,
+		cooldown: defaultCooldown,
+		log:      slog.Default(),
+		now:      time.Now,
 	}
 	for _, fn := range opts {
 		fn(&o)
 	}
 	return &Server{
-		backend:            backend,
-		apkIndex:           o.apkIndex,
-		cooldown:           o.cooldown,
-		historyConcurrency: o.historyConcurrency,
-		enableRepo:         o.enableRepo,
-		enableAPK:          o.enableAPK,
-		now:                o.now,
-		log:                o.log,
+		readier:    readier,
+		repoDatasource: o.repoDatasource,
+		apkDatasource:  o.apkDatasource,
+		cooldown:   o.cooldown,
+		now:        o.now,
+		log:        o.log,
 	}
 }
 
@@ -87,45 +65,129 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.backend.Ready(r.Context()); err != nil {
-			// Log the detail server-side; respond with a generic message so
-			// unauthenticated probes can't enumerate internal filesystem
-			// paths or audiences via the readiness endpoint.
-			s.log.WarnContext(r.Context(), "not ready", "err", err)
-			writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
-			return
+		if s.readier != nil {
+			if err := s.readier.Ready(r.Context()); err != nil {
+				// Log the detail server-side; respond with a generic message so
+				// unauthenticated probes can't enumerate internal filesystem
+				// paths or audiences via the readiness endpoint.
+				s.log.WarnContext(r.Context(), "not ready", "err", err)
+				writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
+				return
+			}
 		}
-		// When the apk index is wired up but the initial load failed,
-		// /v1/apk/{name}/releases will 404 until the next refresh
-		// succeeds — surface that as not-ready so orchestrators can
-		// gate traffic.
-		if s.apkIndex != nil && s.apkIndex.Len() == 0 {
-			s.log.WarnContext(r.Context(), "not ready", "err", "apk index empty")
-			writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
-			return
+		for name, ds := range map[string]datasource.Datasource{"repo": s.repoDatasource, "apk": s.apkDatasource} {
+			if ds == nil {
+				continue
+			}
+			if err := ds.Ready(r.Context()); err != nil {
+				s.log.WarnContext(r.Context(), "not ready", "datasource", name, "err", err)
+				writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
+				return
+			}
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	if s.enableRepo {
-		mux.HandleFunc("GET /v1/repo/{path...}", s.handleRepoV1)
+	// Both /releases endpoints share the same body — parse cooldown,
+	// look up, encode. The mux wiring differs only because repo
+	// paths can be multi-segment (charts/nginx,
+	// iamguarded-charts/postgresql) and http.ServeMux only allows
+	// the {...} wildcard as the trailing segment.
+	if s.repoDatasource != nil {
+		mux.HandleFunc("GET /v1/repo/{path...}", func(w http.ResponseWriter, r *http.Request) {
+			path := r.PathValue("path")
+			repo, ok := strings.CutSuffix(path, "/releases")
+			if !ok || repo == "" {
+				writeAPIError(w, http.StatusNotFound, "Not found.")
+				return
+			}
+			s.serveReleases(w, r, "repo", s.repoDatasource, repo)
+		})
 	}
-	if s.enableAPK {
-		mux.HandleFunc("GET /v1/apk/{name}/releases", s.handleAPKReleases)
+	if s.apkDatasource != nil {
+		mux.HandleFunc("GET /v1/apk/{name}/releases", func(w http.ResponseWriter, r *http.Request) {
+			s.serveReleases(w, r, "apk", s.apkDatasource, r.PathValue("name"))
+		})
 	}
 	return mux
 }
 
-// handleRepoV1 dispatches the /v1/repo/{repo...}/releases endpoint.
-// http.ServeMux only allows the {...} wildcard as the final segment,
-// so we route on a single trailing wildcard and pick the endpoint by
-// suffix (only /releases lives in this service).
-func (s *Server) handleRepoV1(w http.ResponseWriter, r *http.Request) {
-	path := r.PathValue("path")
-	if repo, ok := strings.CutSuffix(path, "/releases"); ok && repo != "" {
-		r.SetPathValue("repo", repo)
-		s.handleReleases(w, r)
+// serveReleases is the shared /releases handler body. Same pipeline
+// for every datasource: parse cooldown, ask the source for releases
+// (which handles name validation itself), encode the response.
+func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, ds datasource.Datasource, packageName string) {
+	// ?cooldown=<dur> overrides the server-wide --cooldown default so a
+	// single deployment can serve multiple Renovate configurations that
+	// each want a different window.
+	cooldown := s.cooldown
+	if raw := r.URL.Query().Get("cooldown"); raw != "" {
+		d, msg, ok := parseCooldownQuery(raw)
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, msg)
+			return
+		}
+		cooldown = d
+	}
+	s.log.InfoContext(r.Context(), "releases request", "kind", kind, "packageName", packageName, "cooldown", cooldown, "remote", r.RemoteAddr, "ua", r.UserAgent())
+
+	before := cutoffFor(s.now(), cooldown)
+	releases, err := ds.Releases(r.Context(), packageName, before)
+	if err != nil {
+		var invalid *datasource.InvalidPackageNameError
+		switch {
+		case errors.As(err, &invalid):
+			writeAPIError(w, http.StatusBadRequest, invalid.Message)
+			return
+		case errors.Is(err, datasource.ErrNotFound):
+			writeAPIError(w, http.StatusNotFound, "No package with that name.")
+			return
+		}
+		s.log.ErrorContext(r.Context(), "releases lookup failed", "kind", kind, "packageName", packageName, "err", err)
+		writeAPIError(w, http.StatusBadGateway, "The upstream lookup failed. Please try again in a moment.")
 		return
 	}
-	writeAPIError(w, http.StatusNotFound, "Not found.")
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(datasource.Response{Releases: releases}); err != nil {
+		s.log.ErrorContext(r.Context(), "encoding response", "kind", kind, "packageName", packageName, "err", err)
+	}
+}
+
+// apiError is the JSON shape returned for every non-OK response
+// from the /v1/* endpoints. /healthz remains plain text "ok".
+type apiError struct {
+	Error string `json:"error"`
+}
+
+// writeAPIError serialises a structured JSON error onto w. Used in
+// place of http.Error everywhere except /healthz so clients can
+// surface the message verbatim.
+func writeAPIError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(apiError{Error: msg})
+}
+
+// cutoffFor turns a cooldown duration into the "before" cutoff the
+// datasource.Datasource API expects. Zero cooldown returns the zero
+// time, which the Datasource treats as "no filter".
+func cutoffFor(now time.Time, cooldown time.Duration) time.Time {
+	if cooldown <= 0 {
+		return time.Time{}
+	}
+	return now.Add(-cooldown)
+}
+
+// parseCooldownQuery parses the ?cooldown=<dur> override. Returns
+// ok=false with a client-facing error message when the value can't
+// be parsed, is negative, or exceeds maxCooldown.
+func parseCooldownQuery(raw string) (time.Duration, string, bool) {
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0, "The 'cooldown' query parameter must be a non-negative Go duration (e.g. 168h).", false
+	}
+	if d > maxCooldown {
+		return 0, "The 'cooldown' query parameter exceeds the maximum of 8760h (365 days).", false
+	}
+	return d, "", true
 }
