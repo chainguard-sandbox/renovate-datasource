@@ -28,8 +28,8 @@ spec:
             - --identity={{ required "identity is required" .Values.identity }}
             - --identity-token={{ .Values.identityToken.mountPath }}/token
             - --port={{ .Values.port }}
-            {{- with .Values.cooldown }}
-            - --cooldown={{ . }}
+            {{- with .Values.minimumReleaseAge }}
+            - --min-release-age={{ . }}
             {{- end }}
             {{- with .Values.datasources }}
             - --datasource={{ join "," . }}

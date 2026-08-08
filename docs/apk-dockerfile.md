@@ -16,21 +16,21 @@ apk add --no-cache \
 > Pinned APK versions may conflict with updated versions in newer
 > images. Pin images by digest to minimize unexpected incompatibilities
 > and keep both the packages and the images up to date with Renovate.
-> Use the same cooldown for both so they move forward together.
+> Use the same `minimumReleaseAge` for both so they move forward together.
 
 To use this example:
 
 - Replace `<datasource-host>` with the hostname of the datasource running
   in your environment.
-- Adjust the cooldown window by changing the `cooldown=168h` query parameter,
-  or drop it entirely to disable per-request cooldown.
+- Adjust the window by changing the `minimumReleaseAge=168h` query
+  parameter, or drop it entirely to disable per-request overrides.
 
 ```jsonc
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
     "chainguard-apk": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/apk/{{packageName}}/releases?cooldown=168h",
+      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/apk/{{packageName}}/releases?minimumReleaseAge=168h",
       "format": "json"
     }
   },

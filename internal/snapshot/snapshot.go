@@ -1,8 +1,8 @@
 // Package snapshot writes Chainguard release feeds to a directory
 // tree that a plain static file server can serve as a Renovate custom
 // datasource. Each configured Datasource is iterated: for every package
-// name it lists, its Releases (post-cooldown) are written to
-// <outputDir>/<name>/<path>/releases.json.
+// name it lists, its Releases (post-minimumReleaseAge filter) are
+// written to <outputDir>/<name>/<path>/releases.json.
 //
 // The JSON shape matches datasource.Response, the same one the live
 // serve command returns, so a Renovate configuration pointed at
@@ -27,11 +27,11 @@ import (
 
 type options struct {
 	datasources       map[string]datasource.Datasource
-	cooldown      time.Duration
-	maxReleaseAge time.Duration
-	concurrency   int
-	now           func() time.Time
-	log           *slog.Logger
+	minimumReleaseAge time.Duration
+	maxReleaseAge     time.Duration
+	concurrency       int
+	now               func() time.Time
+	log               *slog.Logger
 }
 
 // Option configures Generate.
@@ -49,11 +49,11 @@ func WithDatasource(name string, ds datasource.Datasource) Option {
 	}
 }
 
-// WithCooldown sets the cooldown window applied to every source's
+// WithMinimumReleaseAge sets the window applied to every source's
 // Releases call. Frozen at generation time (unlike the serve
-// command's per-request ?cooldown=). 0 disables it.
-func WithCooldown(d time.Duration) Option {
-	return func(o *options) { o.cooldown = d }
+// command's per-request ?minimumReleaseAge=). 0 disables it.
+func WithMinimumReleaseAge(d time.Duration) Option {
+	return func(o *options) { o.minimumReleaseAge = d }
 }
 
 // WithMaxReleaseAge drops releases whose ReleaseTimestamp is older
@@ -130,14 +130,14 @@ func Generate(ctx context.Context, outputDir string, opts ...Option) error {
 		}
 	}()
 
-	// Freeze "now" once so every cutoff — the cooldown "before" we
-	// pass to each Datasource.Releases and the max-release-age cutoff
-	// applied afterwards — uses the same reference time across the
-	// whole run.
+	// Freeze "now" once so every cutoff — the minimumReleaseAge
+	// "before" we pass to each Datasource.Releases and the
+	// max-release-age cutoff applied afterwards — uses the same
+	// reference time across the whole run.
 	now := o.now()
-	var cooldownBefore time.Time
-	if o.cooldown > 0 {
-		cooldownBefore = now.Add(-o.cooldown)
+	var minReleaseAgeBefore time.Time
+	if o.minimumReleaseAge > 0 {
+		minReleaseAgeBefore = now.Add(-o.minimumReleaseAge)
 	}
 	var maxAgeCutoff time.Time
 	if o.maxReleaseAge > 0 {
@@ -161,7 +161,7 @@ func Generate(ctx context.Context, outputDir string, opts ...Option) error {
 				if err := egCtx.Err(); err != nil {
 					return err
 				}
-				releases, err := ds.Releases(egCtx, pkg, cooldownBefore)
+				releases, err := ds.Releases(egCtx, pkg, minReleaseAgeBefore)
 				if err != nil {
 					if errors.Is(err, datasource.ErrNotFound) {
 						// Race: PackageNames listed it, Releases didn't find

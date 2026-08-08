@@ -10,10 +10,10 @@ import (
 	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
-func TestApplyCooldown(t *testing.T) {
+func TestApplyMinimumReleaseAge(t *testing.T) {
 	now := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
-	cooldown := 7 * 24 * time.Hour
-	cutoff := now.Add(-cooldown)
+	minimumReleaseAge := 7 * 24 * time.Hour
+	cutoff := now.Add(-minimumReleaseAge)
 
 	day := func(d int) time.Time { return now.AddDate(0, 0, -d) }
 
@@ -122,9 +122,9 @@ func TestApplyCooldown(t *testing.T) {
 				return tc.history[tagID], nil
 			}
 
-			got, err := applyCooldown(context.Background(), tc.tags, cutoff, histFn, 1)
+			got, err := applyMinimumReleaseAge(context.Background(), tc.tags, cutoff, histFn, 1)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("ApplyCooldown error = %v, wantErr=%v", err, tc.wantErr)
+				t.Fatalf("applyMinimumReleaseAge error = %v, wantErr=%v", err, tc.wantErr)
 			}
 			if tc.wantErr {
 				return
@@ -141,9 +141,9 @@ func TestApplyCooldown(t *testing.T) {
 	}
 }
 
-// TestApplyCooldown_FansOutHistoryCalls verifies that history lookups happen
+// TestApplyMinimumReleaseAge_FansOutHistoryCalls verifies that history lookups happen
 // in parallel up to the configured concurrency.
-func TestApplyCooldown_FansOutHistoryCalls(t *testing.T) {
+func TestApplyMinimumReleaseAge_FansOutHistoryCalls(t *testing.T) {
 	const (
 		numTags     = 50
 		concurrency = 10
@@ -186,23 +186,23 @@ func TestApplyCooldown_FansOutHistoryCalls(t *testing.T) {
 			return nil, ctx.Err()
 		}
 		return []chainguard.TagHistory{
-			{UpdateTimestamp: cutoff.Add(-time.Hour), Digest: "sha256:cooled"},
+			{UpdateTimestamp: cutoff.Add(-time.Hour), Digest: "sha256:rewound"},
 		}, nil
 	}
 
 	start := time.Now()
-	releases, err := applyCooldown(context.Background(), tags, cutoff, histFn, concurrency)
+	releases, err := applyMinimumReleaseAge(context.Background(), tags, cutoff, histFn, concurrency)
 	elapsed := time.Since(start)
 
 	if err != nil {
-		t.Fatalf("ApplyCooldown: %v", err)
+		t.Fatalf("applyMinimumReleaseAge: %v", err)
 	}
 	if len(releases) != numTags {
 		t.Fatalf("got %d releases, want %d", len(releases), numTags)
 	}
 
 	if elapsed > histDelay*time.Duration(numTags/2) {
-		t.Errorf("ApplyCooldown took %v; fan-out doesn't appear to be working", elapsed)
+		t.Errorf("applyMinimumReleaseAge took %v; fan-out doesn't appear to be working", elapsed)
 	}
 	if peak.Load() < int32(concurrency)-1 {
 		t.Errorf("peak in-flight history calls = %d, want close to %d", peak.Load(), concurrency)

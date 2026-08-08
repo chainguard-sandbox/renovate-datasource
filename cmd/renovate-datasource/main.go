@@ -28,7 +28,7 @@ datasource. Two subcommands:
   snapshot  write the same JSON payloads to a static folder tree
 
 Both talk to a single Chainguard org and support the same --datasource
-selection (repo, apk) and cooldown semantics.
+selection (repo, apk) and minimumReleaseAge semantics.
 
 Authentication:
   By default the service loads the chainctl token from disk

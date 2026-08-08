@@ -16,9 +16,10 @@ image:
   digest: ""
   pullPolicy: IfNotPresent
 
-# -- Default cooldown window (--cooldown), Go duration string. Leave empty
-# to disable cooldown; per-request `?cooldown=` still overrides it.
-cooldown: ""
+# -- Default minimum-release-age window (--min-release-age), Go duration
+# string. Leave empty to disable it; per-request `?minimumReleaseAge=`
+# still overrides it.
+minimumReleaseAge: ""
 
 # -- Datasources to expose (--datasource). Empty means both. Set to
 # ["repo"] or ["apk"] to disable the other and skip its startup cost.

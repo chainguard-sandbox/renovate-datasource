@@ -25,9 +25,9 @@ func (r *readyBackend) Ready(context.Context) error { return r.err }
 
 // stubReleasesBackend implements datasource.RepoBackend for tests. It
 // serves a fixed tag list and records how many times ListTagHistory
-// is called — an observable proxy for whether the cooldown path ran.
-// lastRepo captures the last repo argument so multi-segment routing
-// can be verified end-to-end.
+// is called — an observable proxy for whether the minimumReleaseAge
+// path ran. lastRepo captures the last repo argument so
+// multi-segment routing can be verified end-to-end.
 type stubReleasesBackend struct {
 	tags      []chainguard.Tag
 	histCalls atomic.Int32
@@ -47,8 +47,8 @@ func (b *stubReleasesBackend) ListTagHistory(_ context.Context, _ string) ([]cha
 }
 
 // buildAPKDatasource stamps a synthetic index into an APKDatasource so
-// handler tests can exercise cooldown / sorting / 404s without
-// touching the network.
+// handler tests can exercise minimumReleaseAge / sorting / 404s
+// without touching the network.
 func buildAPKDatasource(entries map[string][]apk.PackageVersion) *datasource.APKDatasource {
 	store := apk.NewIndexStore()
 	store.Replace(entries)
@@ -56,7 +56,7 @@ func buildAPKDatasource(entries map[string][]apk.PackageVersion) *datasource.APK
 }
 
 // serverWithFixedNow builds a Server with the given options and pins
-// its clock to frozen so cooldown cutoffs are deterministic.
+// its clock to frozen so minimumReleaseAge cutoffs are deterministic.
 func serverWithFixedNow(frozen time.Time, opts ...Option) *Server {
 	srv := New(nil, opts...)
 	srv.now = func() time.Time { return frozen }
@@ -234,10 +234,11 @@ func TestHandleReleases_MultiSegmentPath(t *testing.T) {
 	}
 }
 
-func TestHandleReleasesCooldownQueryParam(t *testing.T) {
-	// A single "fresh" tag whose current digest is newer than any positive
-	// cooldown cutoff — so cooldown>0 will trigger a history walk while
-	// cooldown=0 will short-circuit to TagsAsReleases.
+func TestHandleReleasesMinimumReleaseAgeQueryParam(t *testing.T) {
+	// A single "fresh" tag whose current digest is newer than any
+	// positive minimumReleaseAge cutoff — so minimumReleaseAge>0 will
+	// trigger a history walk while minimumReleaseAge=0 will
+	// short-circuit to TagsAsReleases.
 	freshTag := chainguard.Tag{
 		ID:          "latest",
 		Name:        "latest",
@@ -246,48 +247,48 @@ func TestHandleReleasesCooldownQueryParam(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		serverCooldown time.Duration
-		query          string
-		wantStatus     int
-		wantHistCalls  int32
-		wantReleases   int
+		name                    string
+		serverMinimumReleaseAge time.Duration
+		query                   string
+		wantStatus              int
+		wantHistCalls           int32
+		wantReleases            int
 	}{
 		{
-			name:           "no query, server default 0 → pass-through, no history walk",
-			serverCooldown: 0,
-			query:          "",
-			wantStatus:     http.StatusOK,
-			wantHistCalls:  0,
-			wantReleases:   1,
+			name:                    "no query, server default 0 → pass-through, no history walk",
+			serverMinimumReleaseAge: 0,
+			query:                   "",
+			wantStatus:              http.StatusOK,
+			wantHistCalls:           0,
+			wantReleases:            1,
 		},
 		{
-			name:           "query cooldown=168h overrides server default 0 → history walk",
-			serverCooldown: 0,
-			query:          "?cooldown=168h",
-			wantStatus:     http.StatusOK,
-			wantHistCalls:  1,
-			wantReleases:   0, // no history entries → tag omitted
+			name:                    "query minimumReleaseAge=168h overrides server default 0 → history walk",
+			serverMinimumReleaseAge: 0,
+			query:                   "?minimumReleaseAge=168h",
+			wantStatus:              http.StatusOK,
+			wantHistCalls:           1,
+			wantReleases:            0, // no history entries → tag omitted
 		},
 		{
-			name:           "query cooldown=0 overrides server default 168h → pass-through",
-			serverCooldown: 168 * time.Hour,
-			query:          "?cooldown=0",
-			wantStatus:     http.StatusOK,
-			wantHistCalls:  0,
-			wantReleases:   1,
+			name:                    "query minimumReleaseAge=0 overrides server default 168h → pass-through",
+			serverMinimumReleaseAge: 168 * time.Hour,
+			query:                   "?minimumReleaseAge=0",
+			wantStatus:              http.StatusOK,
+			wantHistCalls:           0,
+			wantReleases:            1,
 		},
 		{
-			name:           "invalid cooldown returns 400",
-			serverCooldown: 0,
-			query:          "?cooldown=not-a-duration",
-			wantStatus:     http.StatusBadRequest,
+			name:                    "invalid minimumReleaseAge returns 400",
+			serverMinimumReleaseAge: 0,
+			query:                   "?minimumReleaseAge=not-a-duration",
+			wantStatus:              http.StatusBadRequest,
 		},
 		{
-			name:           "negative cooldown returns 400",
-			serverCooldown: 0,
-			query:          "?cooldown=-1h",
-			wantStatus:     http.StatusBadRequest,
+			name:                    "negative minimumReleaseAge returns 400",
+			serverMinimumReleaseAge: 0,
+			query:                   "?minimumReleaseAge=-1h",
+			wantStatus:              http.StatusBadRequest,
 		},
 	}
 
@@ -295,7 +296,7 @@ func TestHandleReleasesCooldownQueryParam(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := &stubReleasesBackend{tags: []chainguard.Tag{freshTag}}
 			h := New(&readyBackend{},
-				WithCooldown(tc.serverCooldown),
+				WithMinimumReleaseAge(tc.serverMinimumReleaseAge),
 				WithRepoDatasource(datasource.NewRepoDatasource(backend, 0)),
 			).Handler()
 
@@ -353,7 +354,7 @@ func TestHandleAPKReleases_NoDatasource(t *testing.T) {
 	}
 }
 
-func TestHandleAPKReleases_CooldownFilterAndSort(t *testing.T) {
+func TestHandleAPKReleases_MinimumReleaseAgeFilterAndSort(t *testing.T) {
 	now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
 	day := func(d int) time.Time { return now.AddDate(0, 0, -d) }
 
@@ -361,7 +362,7 @@ func TestHandleAPKReleases_CooldownFilterAndSort(t *testing.T) {
 		"foo": {
 			{Version: "1.0.0-r0", Timestamp: day(30)},
 			{Version: "1.1.0-r0", Timestamp: day(15)},
-			// Within a 7d cooldown, this one is too fresh and should be filtered out.
+			// Within a 7d minimumReleaseAge, this one is too fresh and should be filtered out.
 			{Version: "1.2.0-r0", Timestamp: day(1)},
 			// Zero timestamp — treated as old enough and always included.
 			{Version: "0.9.0-r0", Timestamp: time.Time{}},
@@ -369,7 +370,7 @@ func TestHandleAPKReleases_CooldownFilterAndSort(t *testing.T) {
 	})
 	h := serverWithFixedNow(now, WithAPKDatasource(ds)).Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases?cooldown=168h", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases?minimumReleaseAge=168h", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -393,7 +394,7 @@ func TestHandleAPKReleases_CooldownFilterAndSort(t *testing.T) {
 	}
 }
 
-func TestHandleAPKReleases_NoCooldownReturnsAll(t *testing.T) {
+func TestHandleAPKReleases_NoMinimumReleaseAgeReturnsAll(t *testing.T) {
 	now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
 	ds := buildAPKDatasource(map[string][]apk.PackageVersion{
 		"foo": {
@@ -413,16 +414,16 @@ func TestHandleAPKReleases_NoCooldownReturnsAll(t *testing.T) {
 	var resp datasource.Response
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if len(resp.Releases) != 2 {
-		t.Errorf("expected all releases without cooldown, got %d", len(resp.Releases))
+		t.Errorf("expected all releases without minimumReleaseAge, got %d", len(resp.Releases))
 	}
 }
 
-func TestHandleAPKReleases_BadCooldown(t *testing.T) {
+func TestHandleAPKReleases_BadMinimumReleaseAge(t *testing.T) {
 	h := New(nil, WithAPKDatasource(buildAPKDatasource(map[string][]apk.PackageVersion{
 		"foo": {{Version: "1.0.0-r0"}},
 	}))).Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases?cooldown=whatever", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/apk/foo/releases?minimumReleaseAge=whatever", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -468,9 +469,9 @@ func TestHandleAPKReleases_PrefixedProvidesName(t *testing.T) {
 	}
 }
 
-// ─── parseCooldownQuery ──────────────────────────────────────────────
+// ─── parseMinimumReleaseAgeQuery ─────────────────────────────────────
 
-func TestParseCooldownQuery(t *testing.T) {
+func TestParseMinimumReleaseAgeQuery(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
@@ -479,7 +480,7 @@ func TestParseCooldownQuery(t *testing.T) {
 		wantOk  bool
 	}{
 		{name: "valid short", raw: "168h", want: 168 * time.Hour, wantOk: true},
-		{name: "valid at max", raw: "8760h", want: maxCooldown, wantOk: true},
+		{name: "valid at max", raw: "8760h", want: maxMinimumReleaseAge, wantOk: true},
 		{name: "zero", raw: "0", want: 0, wantOk: true},
 		{name: "negative", raw: "-1h", wantMsg: "non-negative"},
 		{name: "malformed", raw: "not-a-duration", wantMsg: "non-negative"},
@@ -488,7 +489,7 @@ func TestParseCooldownQuery(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, msg, ok := parseCooldownQuery(tc.raw)
+			got, msg, ok := parseMinimumReleaseAgeQuery(tc.raw)
 			if ok != tc.wantOk {
 				t.Fatalf("ok = %v, want %v (msg=%q)", ok, tc.wantOk, msg)
 			}

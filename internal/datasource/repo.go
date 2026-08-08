@@ -72,14 +72,14 @@ func (s *RepoDatasource) Releases(ctx context.Context, packageName string, befor
 	if before.IsZero() {
 		return tagsAsReleases(tags), nil
 	}
-	return applyCooldown(ctx, tags, before, s.Backend.ListTagHistory, s.HistoryConcurrency)
+	return applyMinimumReleaseAge(ctx, tags, before, s.Backend.ListTagHistory, s.HistoryConcurrency)
 }
 
 // historyFn returns the historical iterations of the tag identified by tagID.
 type historyFn func(ctx context.Context, tagID string) ([]chainguard.TagHistory, error)
 
 // tagsAsReleases emits each tag's current state as a Release, without
-// any cooldown rewind. Used when cooldown is disabled.
+// any history rewind. Used when minimumReleaseAge is disabled.
 func tagsAsReleases(tags []chainguard.Tag) []Release {
 	out := make([]Release, 0, len(tags))
 	for _, t := range tags {
@@ -92,7 +92,8 @@ func tagsAsReleases(tags []chainguard.Tag) []Release {
 	return out
 }
 
-// applyCooldown produces the Renovate releases view for a set of tags.
+// applyMinimumReleaseAge produces the Renovate releases view for a set
+// of tags subject to a minimumReleaseAge cutoff.
 //
 // For each tag:
 //   - if the tag's current digest is on or before the cutoff, emit it as-is;
@@ -102,7 +103,7 @@ func tagsAsReleases(tags []chainguard.Tag) []Release {
 //
 // History lookups run concurrently, bounded by `concurrency` (16 if <= 0).
 // Output order matches input order.
-func applyCooldown(ctx context.Context, tags []chainguard.Tag, cutoff time.Time, history historyFn, concurrency int) ([]Release, error) {
+func applyMinimumReleaseAge(ctx context.Context, tags []chainguard.Tag, cutoff time.Time, history historyFn, concurrency int) ([]Release, error) {
 	if concurrency <= 0 {
 		concurrency = 16
 	}

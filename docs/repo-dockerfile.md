@@ -5,15 +5,15 @@ a `Dockerfile` using the custom datasource.
 
 Renovate's built-in `dockerfile` manager already extracts image references,
 so no custom manager is needed — we just redirect its lookups through the
-custom datasource so Renovate can honour the cooldown window.
+custom datasource so Renovate can honour the `minimumReleaseAge` window.
 
 To use this example:
 
 - Replace `<datasource-host>` with the hostname of the datasource running
   in your environment.
-- Adjust the cooldown window by changing the `cooldown=168h` query parameter,
-  or drop it entirely to disable per-request cooldown (the server-wide
-  `--cooldown` flag still applies, if set).
+- Adjust the window by changing the `minimumReleaseAge=168h` query
+  parameter, or drop it entirely to disable per-request overrides (the
+  server-wide `--min-release-age` flag still applies, if set).
 - Replace every instance of `cgr.dev/my-org` with your own Chainguard
   organization name or internal mirror/proxy.
 
@@ -22,7 +22,7 @@ To use this example:
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
     "chainguard-repo": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?cooldown=168h",
+      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?minimumReleaseAge=168h",
       "format": "json"
     }
   },

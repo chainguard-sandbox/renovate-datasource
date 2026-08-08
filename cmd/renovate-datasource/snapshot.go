@@ -17,13 +17,13 @@ import (
 )
 
 type snapshotOptions struct {
-	org           string
-	outputDir     string
-	cooldown      time.Duration
-	maxReleaseAge time.Duration
-	concurrency   int
-	datasources   []string
-	logLevel      string
+	org               string
+	outputDir         string
+	minimumReleaseAge time.Duration
+	maxReleaseAge     time.Duration
+	concurrency       int
+	datasources       []string
+	logLevel          string
 
 	identity      string
 	identityToken string
@@ -61,9 +61,9 @@ Examples:
   renovate-datasource snapshot --org=my.org.com -d /out \
       --datasource=apk --max-release-age=4380h
 
-  # Only images/charts, with a week's cooldown applied at generation time.
+  # Only images/charts, with a week's minimum-release-age applied at generation time.
   renovate-datasource snapshot --org=my.org.com -d /out \
-      --datasource=repo --cooldown=168h`,
+      --datasource=repo --min-release-age=168h`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSnapshot(cmd.Context(), opts)
@@ -72,7 +72,7 @@ Examples:
 
 	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name (required)")
 	cmd.Flags().StringVarP(&opts.outputDir, "output-dir", "d", "", "output directory; must not already exist (required)")
-	cmd.Flags().DurationVar(&opts.cooldown, "cooldown", 0, "cooldown window (Go duration, e.g. 168h). Frozen at generation time. 0 (default) disables it.")
+	cmd.Flags().DurationVar(&opts.minimumReleaseAge, "min-release-age", 0, "minimum-release-age window (Go duration, e.g. 168h). Frozen at generation time. 0 (default) disables it.")
 	cmd.Flags().DurationVar(&opts.maxReleaseAge, "max-release-age", 0, "drop releases older than this (Go duration, e.g. 4380h for ~6 months) and skip packages/repos with nothing in the window. 0 (default) disables it.")
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 16, "cap on concurrent platform-API calls; also drives the per-package fan-out inside each source and the per-repo history fan-out")
 	cmd.Flags().StringSliceVar(&opts.datasources, "datasource", []string{"repo", "apk"}, "comma-separated list of datasources to snapshot (repo, apk).")
@@ -120,7 +120,7 @@ func runSnapshot(parent context.Context, opts *snapshotOptions) error {
 
 	snapshotOpts := []snapshot.Option{
 		snapshot.WithLogger(log),
-		snapshot.WithCooldown(opts.cooldown),
+		snapshot.WithMinimumReleaseAge(opts.minimumReleaseAge),
 		snapshot.WithMaxReleaseAge(opts.maxReleaseAge),
 		snapshot.WithConcurrency(opts.concurrency),
 	}

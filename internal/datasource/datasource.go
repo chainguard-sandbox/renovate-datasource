@@ -49,9 +49,10 @@ type Datasource interface {
 
 	// Releases returns the releases for packageName. If before is
 	// non-zero, releases whose timestamp is after that instant are
-	// filtered out; callers precompute before = now.Add(-cooldown)
-	// so the same cutoff can be shared across every Releases call
-	// in a batch. Zero before disables the filter entirely.
+	// filtered out; callers precompute before =
+	// now.Add(-minimumReleaseAge) so the same cutoff can be shared
+	// across every Releases call in a batch. Zero before disables
+	// the filter entirely.
 	//
 	// Malformed packageNames produce a *InvalidPackageNameError so a
 	// bad URL segment turns into a 400 rather than falling through

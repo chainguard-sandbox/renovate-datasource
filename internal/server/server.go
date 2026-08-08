@@ -16,9 +16,9 @@ import (
 	"github.com/chainguard-sandbox/renovate-datasource/internal/datasource"
 )
 
-// maxCooldown bounds the ?cooldown= override at one year. Beyond
-// that we assume a malformed request rather than intent.
-const maxCooldown = 365 * 24 * time.Hour
+// maxMinimumReleaseAge bounds the ?minimumReleaseAge= override at one
+// year. Beyond that we assume a malformed request rather than intent.
+const maxMinimumReleaseAge = 365 * 24 * time.Hour
 
 // Readier reports auth-layer readiness. Typically satisfied by
 // *chainguard.Client so /readyz can surface a stale chainctl token
@@ -28,12 +28,12 @@ type Readier interface {
 }
 
 type Server struct {
-	readier    Readier
-	repoDatasource datasource.Datasource
-	apkDatasource  datasource.Datasource
-	cooldown   time.Duration
-	now        func() time.Time
-	log        *slog.Logger
+	readier           Readier
+	repoDatasource    datasource.Datasource
+	apkDatasource     datasource.Datasource
+	minimumReleaseAge time.Duration
+	now               func() time.Time
+	log               *slog.Logger
 }
 
 // New builds a Server. readier drives the /readyz auth check.
@@ -41,20 +41,20 @@ type Server struct {
 // is required for its endpoint to be registered.
 func New(readier Readier, opts ...Option) *Server {
 	o := options{
-		cooldown: defaultCooldown,
-		log:      slog.Default(),
-		now:      time.Now,
+		minimumReleaseAge: defaultMinimumReleaseAge,
+		log:               slog.Default(),
+		now:               time.Now,
 	}
 	for _, fn := range opts {
 		fn(&o)
 	}
 	return &Server{
-		readier:    readier,
-		repoDatasource: o.repoDatasource,
-		apkDatasource:  o.apkDatasource,
-		cooldown:   o.cooldown,
-		now:        o.now,
-		log:        o.log,
+		readier:           readier,
+		repoDatasource:    o.repoDatasource,
+		apkDatasource:     o.apkDatasource,
+		minimumReleaseAge: o.minimumReleaseAge,
+		now:               o.now,
+		log:               o.log,
 	}
 }
 
@@ -88,11 +88,11 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Both /releases endpoints share the same body — parse cooldown,
-	// look up, encode. The mux wiring differs only because repo
-	// paths can be multi-segment (charts/nginx,
-	// iamguarded-charts/postgresql) and http.ServeMux only allows
-	// the {...} wildcard as the trailing segment.
+	// Both /releases endpoints share the same body — parse the
+	// minimumReleaseAge window, look up, encode. The mux wiring
+	// differs only because repo paths can be multi-segment
+	// (charts/nginx, iamguarded-charts/postgresql) and http.ServeMux
+	// only allows the {...} wildcard as the trailing segment.
 	if s.repoDatasource != nil {
 		mux.HandleFunc("GET /v1/repo/{path...}", func(w http.ResponseWriter, r *http.Request) {
 			path := r.PathValue("path")
@@ -113,24 +113,26 @@ func (s *Server) Handler() http.Handler {
 }
 
 // serveReleases is the shared /releases handler body. Same pipeline
-// for every datasource: parse cooldown, ask the source for releases
-// (which handles name validation itself), encode the response.
+// for every datasource: parse the minimumReleaseAge window, ask the
+// source for releases (which handles name validation itself), encode
+// the response.
 func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, ds datasource.Datasource, packageName string) {
-	// ?cooldown=<dur> overrides the server-wide --cooldown default so a
-	// single deployment can serve multiple Renovate configurations that
-	// each want a different window.
-	cooldown := s.cooldown
-	if raw := r.URL.Query().Get("cooldown"); raw != "" {
-		d, msg, ok := parseCooldownQuery(raw)
+	// ?minimumReleaseAge=<dur> overrides the server-wide
+	// --min-release-age default so a single deployment can serve
+	// multiple Renovate configurations that each want a different
+	// window.
+	minimumReleaseAge := s.minimumReleaseAge
+	if raw := r.URL.Query().Get("minimumReleaseAge"); raw != "" {
+		d, msg, ok := parseMinimumReleaseAgeQuery(raw)
 		if !ok {
 			writeAPIError(w, http.StatusBadRequest, msg)
 			return
 		}
-		cooldown = d
+		minimumReleaseAge = d
 	}
-	s.log.InfoContext(r.Context(), "releases request", "kind", kind, "packageName", packageName, "cooldown", cooldown, "remote", r.RemoteAddr, "ua", r.UserAgent())
+	s.log.InfoContext(r.Context(), "releases request", "kind", kind, "packageName", packageName, "minimumReleaseAge", minimumReleaseAge, "remote", r.RemoteAddr, "ua", r.UserAgent())
 
-	before := cutoffFor(s.now(), cooldown)
+	before := cutoffFor(s.now(), minimumReleaseAge)
 	releases, err := ds.Releases(r.Context(), packageName, before)
 	if err != nil {
 		var invalid *datasource.InvalidPackageNameError
@@ -168,26 +170,27 @@ func writeAPIError(w http.ResponseWriter, status int, msg string) {
 	_ = json.NewEncoder(w).Encode(apiError{Error: msg})
 }
 
-// cutoffFor turns a cooldown duration into the "before" cutoff the
-// datasource.Datasource API expects. Zero cooldown returns the zero
-// time, which the Datasource treats as "no filter".
-func cutoffFor(now time.Time, cooldown time.Duration) time.Time {
-	if cooldown <= 0 {
+// cutoffFor turns a minimumReleaseAge duration into the "before" cutoff
+// the datasource.Datasource API expects. Zero returns the zero time,
+// which the Datasource treats as "no filter".
+func cutoffFor(now time.Time, minimumReleaseAge time.Duration) time.Time {
+	if minimumReleaseAge <= 0 {
 		return time.Time{}
 	}
-	return now.Add(-cooldown)
+	return now.Add(-minimumReleaseAge)
 }
 
-// parseCooldownQuery parses the ?cooldown=<dur> override. Returns
-// ok=false with a client-facing error message when the value can't
-// be parsed, is negative, or exceeds maxCooldown.
-func parseCooldownQuery(raw string) (time.Duration, string, bool) {
+// parseMinimumReleaseAgeQuery parses the ?minimumReleaseAge=<dur>
+// override. Returns ok=false with a client-facing error message when
+// the value can't be parsed, is negative, or exceeds
+// maxMinimumReleaseAge.
+func parseMinimumReleaseAgeQuery(raw string) (time.Duration, string, bool) {
 	d, err := time.ParseDuration(raw)
 	if err != nil || d < 0 {
-		return 0, "The 'cooldown' query parameter must be a non-negative Go duration (e.g. 168h).", false
+		return 0, "The 'minimumReleaseAge' query parameter must be a non-negative Go duration (e.g. 168h).", false
 	}
-	if d > maxCooldown {
-		return 0, "The 'cooldown' query parameter exceeds the maximum of 8760h (365 days).", false
+	if d > maxMinimumReleaseAge {
+		return 0, "The 'minimumReleaseAge' query parameter exceeds the maximum of 8760h (365 days).", false
 	}
 	return d, "", true
 }

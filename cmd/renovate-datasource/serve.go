@@ -21,13 +21,13 @@ import (
 )
 
 type serveOptions struct {
-	port            int
-	cooldown        time.Duration
-	org             string
-	concurrency     int
-	apkIndexRefresh time.Duration
-	datasources     []string
-	logLevel        string
+	port              int
+	minimumReleaseAge time.Duration
+	org               string
+	concurrency       int
+	apkIndexRefresh   time.Duration
+	datasources       []string
+	logLevel          string
 
 	identity      string
 	identityToken string
@@ -47,18 +47,18 @@ consumes:
   /v1/apk/{name}/releases    apk packages, including prefixed capabilities
                              like "cmd:gcloud" or unversioned "nodejs"
 
-Pass --cooldown=<dur> to set a server-wide default, or ?cooldown=<dur>
-per request, to only surface digests that have been stable that long.
-Tags newer than the cooldown are rewound to the most recent historical
-digest that satisfies it.
+Pass --min-release-age=<dur> to set a server-wide default, or
+?minimumReleaseAge=<dur> per request, to only surface digests that
+have been stable that long. Tags newer than the window are rewound
+to the most recent historical digest that satisfies it.
 
 Examples:
 
   # Serve both datasources on the default port.
   renovate-datasource serve --org=my.org.com
 
-  # Serve only /v1/repo, with a week's default cooldown.
-  renovate-datasource serve --org=my.org.com --datasource=repo --cooldown=168h`,
+  # Serve only /v1/repo, with a week's default minimum-release-age.
+  renovate-datasource serve --org=my.org.com --datasource=repo --min-release-age=168h`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runServe(cmd.Context(), opts)
@@ -66,7 +66,7 @@ Examples:
 	}
 
 	cmd.Flags().IntVar(&opts.port, "port", 8080, "HTTP listen port")
-	cmd.Flags().DurationVar(&opts.cooldown, "cooldown", 0, "default cooldown window (Go duration, e.g. 168h); can be overridden per request via ?cooldown=<dur>. 0 (default) disables it.")
+	cmd.Flags().DurationVar(&opts.minimumReleaseAge, "min-release-age", 0, "default minimum-release-age window (Go duration, e.g. 168h); can be overridden per request via ?minimumReleaseAge=<dur>. 0 (default) disables it.")
 	cmd.Flags().StringVar(&opts.org, "org", "", "Chainguard org/group name (required)")
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 16, "cap on concurrent platform-API calls (ListTags, ListTagHistory, ListAllRepos); also bounds per-request history fan-out")
 	cmd.Flags().DurationVar(&opts.apkIndexRefresh, "apk-index-refresh", time.Hour, "how often to re-fetch the apk indexes served under /v1/apk/{name}/releases. 0 disables the background refresh (indexes are still loaded once at startup).")
@@ -110,10 +110,10 @@ func runServe(parent context.Context, opts *serveOptions) error {
 		}
 	}()
 
-	log.Info("resolved org", "org", opts.org, "uidp", cg.OrgUIDP, "cooldown", opts.cooldown, "auth", authLbl, "datasources", opts.datasources)
+	log.Info("resolved org", "org", opts.org, "uidp", cg.OrgUIDP, "minimumReleaseAge", opts.minimumReleaseAge, "auth", authLbl, "datasources", opts.datasources)
 
 	serverOpts := []server.Option{
-		server.WithCooldown(opts.cooldown),
+		server.WithMinimumReleaseAge(opts.minimumReleaseAge),
 		server.WithLogger(log),
 	}
 

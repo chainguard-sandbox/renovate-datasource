@@ -7,25 +7,25 @@ import (
 	"github.com/chainguard-sandbox/renovate-datasource/internal/datasource"
 )
 
-const defaultCooldown = 0
+const defaultMinimumReleaseAge = 0
 
 type options struct {
-	cooldown   time.Duration
-	repoDatasource datasource.Datasource
-	apkDatasource  datasource.Datasource
-	log        *slog.Logger
-	now        func() time.Time
+	minimumReleaseAge time.Duration
+	repoDatasource    datasource.Datasource
+	apkDatasource     datasource.Datasource
+	log               *slog.Logger
+	now               func() time.Time
 }
 
 // Option configures New.
 type Option func(*options)
 
-// WithCooldown sets the default cooldown window applied when a request
-// doesn't provide its own ?cooldown=<dur> query parameter. Default is 0
-// (disabled), in which case /v1/repo/{repo}/releases serves the upstream
-// tag list as-is, skipping the per-tag history rewind.
-func WithCooldown(d time.Duration) Option {
-	return func(o *options) { o.cooldown = d }
+// WithMinimumReleaseAge sets the default window applied when a request
+// doesn't provide its own ?minimumReleaseAge=<dur> query parameter.
+// Default is 0 (disabled), in which case /v1/repo/{repo}/releases serves
+// the upstream tag list as-is, skipping the per-tag history rewind.
+func WithMinimumReleaseAge(d time.Duration) Option {
+	return func(o *options) { o.minimumReleaseAge = d }
 }
 
 // WithLogger sets the structured logger. Default is slog.Default().

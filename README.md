@@ -8,14 +8,18 @@ for Chainguard images, Helm charts and APK packages.
 
 This primarily supports two use cases:
 
-- **Cooldown for images and charts.** Renovate's built-in `docker`
-  datasource doesn't honour `minimumReleaseAge`; this datasource fills the
-  gap by only surfacing updates at least *N* time in the past. Pairs
-  nicely with Chainguard's optional [`cooldown` policy](https://edu.chainguard.dev/chainguard/chainguard-repository/container-policies/#cooldown)
-  for containers, which blocks pulls at the registry level.
+- **`minimumReleaseAge` for images and charts.** Renovate's built-in
+  [`docker` datasource](https://docs.renovatebot.com/modules/datasource/docker/)
+  doesn't honour
+  [`minimumReleaseAge`](https://docs.renovatebot.com/key-concepts/minimum-release-age/#which-datasources-support-release-timestamps)
+  for registries other than Docker Hub, so this datasource fills the gap by
+  only surfacing updates at least *N* time in the past.
+  - Pairs nicely with Chainguard's optional [`cooldown`
+    policy](https://edu.chainguard.dev/chainguard/chainguard-repository/container-policies/#cooldown)
+    for containers, which blocks pulls at the registry level.
 - **APK package versions.** Renovate has no native support for Chainguard's APK
   packages, so pinned `apk add pkg=version` lines can't be kept up to date
-  without a custom datasource.
+  without a custom datasource like this one.
 
 ## Configuring Renovate
 
@@ -112,9 +116,9 @@ the output to wherever you are hosting the datasource.
 # Write the full snapshot to /tmp/snap
 ./renovate-datasource snapshot --org=my.org.com -d /tmp/snap
 
-# Apply a cooldown to the snapshot
+# Apply a minimum-release-age window to the snapshot
 ./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
-    --cooldown=168h
+    --min-release-age=168h
 
 # Only write the snapshot for one of the datasources (repo, apk)
 ./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
@@ -198,12 +202,13 @@ service.type=LoadBalancer`), or a `kubectl port-forward` for local testing).
 
 ## How It Works
 
-### Cooldown
+### Minimum release age
 
-Disabled by default. Enable it either server-wide with `--cooldown=<duration>`
-(e.g. `168h`) or per request via a `?cooldown=<duration>` query parameter on
-`/releases`. The query parameter, when present, overrides the flag. When
-used, it provides a view of the releases as of *N* time in the past.
+Disabled by default. Enable it either server-wide with
+`--min-release-age=<duration>` (e.g. `168h`) or per request via a
+`?minimumReleaseAge=<duration>` query parameter on `/releases`. The
+query parameter, when present, overrides the flag. When used, it
+provides a view of the releases as of *N* time in the past.
 
 ### Images and Helm Charts
 
@@ -236,11 +241,12 @@ and formats the results in the expected format.
 }
 ```
 
-Where the timestamp of a tag falls within the cooldown window, the tag history
-API ([`/registry/v1/tags/{parentId}/history`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags/{parentId}/history))
+Where the timestamp of a tag falls within the `minimumReleaseAge`
+window, the tag history API
+([`/registry/v1/tags/{parentId}/history`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags/{parentId}/history))
 is used to rewind the tag back to the latest digest outside of the window.
 
-If no historical digest satisfies the cooldown then the tag is omitted from the
+If no historical digest satisfies the window then the tag is omitted from the
 results entirely.
 
 ### APKs
@@ -256,7 +262,7 @@ https://virtualapk.cgr.dev/<org-id>/extra-packages
 ```
 
 It uses the `t:` field in the index as the `releaseTimestamp` and omits versions
-where the timestamp falls inside the cooldown window.
+where the timestamp falls inside the `minimumReleaseAge` window.
 
 ```json
 {

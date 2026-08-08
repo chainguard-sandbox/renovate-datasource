@@ -26,8 +26,8 @@ To use this example:
 
 - Replace `<datasource-host>` with the hostname of the datasource running
   in your environment.
-- Adjust the cooldown window by changing the `cooldown=168h` query parameter,
-  or drop it entirely to disable per-request cooldown.
+- Adjust the window by changing the `minimumReleaseAge=168h` query
+  parameter, or drop it entirely to disable per-request overrides.
 - Replace every instance of `cgr.dev/my-org` with your own Chainguard
   organization name or internal mirror/proxy.
 
@@ -36,7 +36,7 @@ To use this example:
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
     "chainguard-repo": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?cooldown=168h",
+      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/repo/{{packageName}}/releases?minimumReleaseAge=168h",
       "format": "json"
     }
   },
