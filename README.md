@@ -8,7 +8,7 @@ for Chainguard images, Helm charts and APK packages.
 
 This primarily supports two use cases:
 
-- **`minimumReleaseAge` for images and charts.** Renovate's built-in
+- **`minimumReleaseAge` support.** Renovate's built-in
   [`docker` datasource](https://docs.renovatebot.com/modules/datasource/docker/)
   doesn't honour
   [`minimumReleaseAge`](https://docs.renovatebot.com/key-concepts/minimum-release-age/#which-datasources-support-release-timestamps)
@@ -21,16 +21,29 @@ This primarily supports two use cases:
   packages, so pinned `apk add pkg=version` lines can't be kept up to date
   without a custom datasource like this one.
 
-## Configuring Renovate
+## Documentation
+
+### Datasources
+
+Documentation that explains how each datasource works and the relevant
+configuration options.
+
+- [`repo`](docs/repo-datasource.md) - OCI repositories (images and helm charts)
+- [`apk`](docs/apk-datasource.md) - APK packages
+
+### Configuring Renovate
 
 Examples of configuring Renovate to use the datasource.
 
-- [Updating Chainguard Images in Dockerfiles](docs/repo-dockerfile.md)
+- [Updating Chainguard Images in Dockerfiles](docs/repo-image-dockerfile.md)
 - [Updating APK Package Versions in Dockerfiles](docs/apk-dockerfile.md)
-- [Updating Chainguard Helm Charts in ArgoCD Applications](docs/helm-argocd.md)
-- [Updating Chainguard Helm Charts as Chart.yaml Dependencies](docs/helm-dependency.md)
-- [Updating Chainguard Helm Charts in Flux](docs/helm-flux.md)
-- [Updating Chainguard Helm Charts in Helmfiles](docs/helm-helmfile.md)
+- [Updating Chainguard Helm Charts in ArgoCD Applications](docs/repo-helm-argocd.md)
+- [Updating Chainguard Helm Charts as Chart.yaml Dependencies](docs/repo-helm-dependency.md)
+- [Updating Chainguard Helm Charts in Flux](docs/repo-helm-flux.md)
+- [Updating Chainguard Helm Charts in Helmfiles](docs/repo-helm-helmfile.md)
+
+See [Using Renovate with Chainguard Containers](https://edu.chainguard.dev/chainguard/chainguard-images/staying-secure/updating-images/renovate/)
+on Chainguard Academy for general guidance on using Renovate with Chainguard.
 
 ## Build
 
@@ -38,7 +51,7 @@ Examples of configuring Renovate to use the datasource.
 go build ./cmd/renovate-datasource
 ```
 
-Or, build the container image:
+Or the container image:
 
 ```
 docker build -t renovate-datasource:dev .
@@ -46,30 +59,30 @@ docker build -t renovate-datasource:dev .
 
 ## Run
 
-### HTTP Server
+### Serve
 
-The `serve` subcommand hosts the datasource on a local webserver.
+Starts a local webserver on `:8080` that hosts the datasources.
 
 ```
-# Login to Chainguard - the datasource will reuse these credentials
-chainctl auth login
-
-# Serves both /v1/repo/{packageName}/releases and /v1/apk/{packageName}/releases
 ./renovate-datasource serve --org=my.org.com
-
-# Use --datasource to only serve one of the datasources
-./renovate-datasource serve --org=my.org.com --datasource apk
 ```
 
-You can also use an [assumable
-identity](https://edu.chainguard.dev/platform/administration/assumable-ids/) to
-authenticate with an OIDC token from a non-interactive workload like a
-Kubernetes pod.
+Provides two endpoints, one for the APK packages and another for the images and
+charts which are hosted as artifacts in OCI repositories under `cgr.dev`.
+
 
 ```
-./renovate-datasource serve --org=my.org.com \
-    --identity=<identity-uidp> \
-    --identity-token=/path/to/token
+/v1/apk/{packageName}/releases
+/v1/repo/{packageName}/releases
+```
+
+Pass `--datasource` to serve just one — see the
+[`apk`](docs/apk-datasource.md) and [`repo`](docs/repo-datasource.md)
+docs for the options specific to each:
+
+```
+./renovate-datasource serve --org=my.org.com --datasource=apk
+./renovate-datasource serve --org=my.org.com --datasource=repo
 ```
 
 The datasource endpoints are then a plain HTTP GET away:
@@ -88,16 +101,36 @@ $ curl -sf http://localhost:8080/v1/apk/curl/releases
     }
   ]
 }
+
+$ curl -sf http://localhost:8080/v1/repo/python/releases
+{
+  "releases": [
+    {
+      "version": "3.14.6",
+      "releaseTimestamp": "2026-06-14T18:46:31.317Z",
+      "digest": "sha256:d5312494fbc793de620941d10e2bc04f0c2ce67706b9da2071b297474218c719"
+    },
+    {
+      "version": "3.14.5",
+      "releaseTimestamp": "2026-06-10T20:18:06.42Z",
+      "digest": "sha256:163cc24b066e0ea18daa4966227cdb8e61c2cf9f49681bc566459506901533a6"
+    }
+  ]
+}
 ```
 
-Point Renovate at it via a [custom
-datasource](https://docs.renovatebot.com/modules/datasource/custom/):
+Point Renovate at the URLs with [custom
+datasources](https://docs.renovatebot.com/modules/datasource/custom/):
 
 ```json
 {
   "customDatasources": {
     "chainguard-apk": {
       "defaultRegistryUrlTemplate": "http://localhost:8080/v1/apk/{{packageName}}/releases",
+      "format": "json"
+    },
+    "chainguard-repo": {
+      "defaultRegistryUrlTemplate": "http://localhost:8080/v1/repo/{{packageName}}/releases",
       "format": "json"
     }
   }
@@ -106,28 +139,20 @@ datasource](https://docs.renovatebot.com/modules/datasource/custom/):
 
 ### Snapshot
 
-The `snapshot` command writes the response for every package to disk so that it
-can be served by any static webserver. 
-
-This is a one-shot command that you would typically run on a schedule, copying
-the output to wherever you are hosting the datasource.
+Writes the datasource responses to a static folder tree for hosting behind any
+web server. Typically run on a schedule.
 
 ```
-# Write the full snapshot to /tmp/snap
 ./renovate-datasource snapshot --org=my.org.com -d /tmp/snap
+```
 
-# Apply a minimum-release-age window to the snapshot
-./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
-    --min-release-age=168h
+Pass `--datasource` to snapshot just one — see the
+[`apk`](docs/apk-datasource.md) and [`repo`](docs/repo-datasource.md)
+docs for the options specific to each:
 
-# Only write the snapshot for one of the datasources (repo, apk)
-./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
-    --datasource apk
-
-# Exclude versions older than a specific duration, which limits the size of the
-# snapshot.
-./renovate-datasource snapshot --org=my.org.com -d /tmp/snap \
-    --max-release-age=4380h
+```
+./renovate-datasource snapshot --org=my.org.com --datasource=apk -d /tmp/snap
+./renovate-datasource snapshot --org=my.org.com --datasource=repo -d /tmp/snap
 ```
 
 Layout:
@@ -146,42 +171,30 @@ Layout:
     └── python/releases.json                       # image
 ```
 
-Point Renovate at the hosted files via a [custom
-datasource](https://docs.renovatebot.com/modules/datasource/custom/):
+Point Renovate at the hosted files via [custom
+datasources](https://docs.renovatebot.com/modules/datasource/custom/):
 
 ```json
 {
   "customDatasources": {
     "chainguard-apk": {
-      "defaultRegistryUrlTemplate": "http://<static-host>/apk/{{packageName}}/releases.json",
+      "defaultRegistryUrlTemplate": "https://<static-host>/apk/{{packageName}}/releases.json",
+      "format": "json"
+    },
+    "chainguard-repo": {
+      "defaultRegistryUrlTemplate": "https://<static-host>/repo/{{packageName}}/releases.json",
       "format": "json"
     }
   }
 }
 ```
 
-### Kubernetes
+## Deploying to Kubernetes
 
-Deploy to Kubernetes with the provided [Helm chart](chart/).
-
-Firstly, create an assumable identity as described in [the
-documentation](https://edu.chainguard.dev/chainguard/administration/assumable-ids/identity-examples/kubernetes-identity/)
-with the `registry.pull` and `apk.pull` roles. Assuming the service is
-deployed to the `chainguard` namespace and the issuer URL of your cluster
-is publicly available:
-
-```
-chainctl iam identity create renovate-datasource \
-  --parent=<your-chainguard-org> \
-  --identity-issuer=<your-cluster-oidc-issuer-url> \
-  --subject=system:serviceaccount:chainguard:renovate-datasource \
-  --role=registry.pull \
-  --role=apk.pull
-```
-
-Note the printed identity UIDP — that's the value for `identity` below.
-
-Then, install the chart, supplying your own org, identity UIDP and image details:
+Install the provided [Helm chart](chart/). Create an assumable
+identity with the `registry.pull` and `apk.pull` roles (see
+[Chainguard Academy](https://edu.chainguard.dev/chainguard/administration/assumable-ids/identity-examples/kubernetes-identity/))
+and pass its UIDP:
 
 ```
 helm install renovate-datasource ./chart \
@@ -196,117 +209,5 @@ helm install renovate-datasource ./chart \
   --set ingress.hostname=<your-ingress-hostname>
 ```
 
-Omit the three `ingress.*` flags to skip Ingress (e.g. if you're exposing
-the service through a mesh, a `LoadBalancer` Service (`--set
-service.type=LoadBalancer`), or a `kubectl port-forward` for local testing).
-
-## How It Works
-
-### Minimum release age
-
-Disabled by default. Enable it either server-wide with
-`--min-release-age=<duration>` (e.g. `168h`) or per request via a
-`?minimumReleaseAge=<duration>` query parameter on `/releases`. The
-query parameter, when present, overrides the flag. When used, it
-provides a view of the releases as of *N* time in the past.
-
-### Images and Helm Charts
-
-Releases for images and helm charts are returned from the same `/v1/repo/{repo}/releases`
-URL pattern.
-
-```
-/v1/repo/python/releases                       → cgr.dev/<org>/python
-/v1/repo/charts/nginx/releases                 → cgr.dev/<org>/charts/nginx
-/v1/repo/iamguarded-charts/postgresql/releases → cgr.dev/<org>/iamguarded-charts/postgresql
-```
-
-The datasource lists the tags with [`/registry/v1/tags`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags)
-and formats the results in the expected format.
-
-```json
-{
-  "releases": [
-    {
-      "version": "3.14.5",
-      "releaseTimestamp": "2026-06-10T20:18:06.42Z",
-      "digest": "sha256:163cc24b066e0ea18daa4966227cdb8e61c2cf9f49681bc566459506901533a6"
-    },
-    {
-      "version": "3.14.6",
-      "releaseTimestamp": "2026-06-14T18:46:31.317Z",
-      "digest": "sha256:d5312494fbc793de620941d10e2bc04f0c2ce67706b9da2071b297474218c719"
-    }
-  ]
-}
-```
-
-Where the timestamp of a tag falls within the `minimumReleaseAge`
-window, the tag history API
-([`/registry/v1/tags/{parentId}/history`](https://edu.chainguard.dev/platform/api/spec-api-v1/#tag/registry/GET/registry/v1/tags/{parentId}/history))
-is used to rewind the tag back to the latest digest outside of the window.
-
-If no historical digest satisfies the window then the tag is omitted from the
-results entirely.
-
-### APKs
-
-By default, the datasource pulls the APKINDEX for each of the organization's
-repositories at startup and regularly refreshes it according to the value of
-`--apk-index-refresh` (default `1h`).
-
-```
-https://apk.cgr.dev/<org-name>
-https://virtualapk.cgr.dev/<org-id>/chainguard
-https://virtualapk.cgr.dev/<org-id>/extra-packages
-```
-
-Access to `apk.cgr.dev` requires that you have logged in with
-`chainctl auth login --audience=apk.cgr.dev` or are using an assumable identity and passing
-`--identity` and `--identity-token` when you run the datasource.
-
-Use `--apk-repository=<url>` to point at your own mirrors
-or proxies instead.
-
-```
-# If auth is required, set it via the HTTP_AUTH environment variable
-export HTTP_AUTH="basic:mirror.example:<user>:<password>"
-
-./renovate-datasource serve --datasource=apk \
-    --apk-repository=https://mirror.example/apk/chainguard \
-    --apk-repository=https://mirror.example/apk/extra-packages
-```
-
-You can also use this to point only at your public `virtualapk.cgr.dev` repos,
-excluding the private. This removes the requirement to authenticate with
-Chainguard at all, as both URLs are public.
-
-```
-./renovate-datasource serve --datasource=apk \
-    --apk-repository=https://virtualapk.cgr.dev/<org-id>/chainguard \
-    --apk-repository=https://virtualapk.cgr.dev/<org-id>/extra-packages
-```
-
-The datasource uses the `t:` field in the index as the `releaseTimestamp` and omits versions
-where the timestamp falls inside the `minimumReleaseAge` window.
-
-```json
-{
-  "releases": [
-    {
-      "version": "3.14.5-r0",
-      "releaseTimestamp": "2026-06-10T20:18:06.42Z"
-    },
-    {
-      "version": "3.14.6-r1",
-      "releaseTimestamp": "2026-06-14T18:46:31.317Z"
-    }
-  ]
-}
-```
-
-This supports provides and prefixed capabilities as well:
-1. For instance `nodejs` will return all versions for the packages that provide it
-   (`nodejs-26`, `nodejs-25` etc)
-2. And `cmd:gcloud`, which will return versions for `google-cloud-sdk`.
-
+Omit the `ingress.*` flags to skip Ingress creation (e.g. behind a
+mesh, a `LoadBalancer` Service, or `kubectl port-forward`).

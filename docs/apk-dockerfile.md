@@ -44,7 +44,7 @@ To use this example:
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["(^|/)Dockerfile$"],
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
       // Scope the version match to the arguments of an `apk add`
       // invocation, tolerating backslash-continued lines so
       // multi-package installs like

@@ -3,6 +3,12 @@
 Example Renovate configuration that updates Chainguard chart references in
 a [`helmfile.yaml`](https://helmfile.readthedocs.io/).
 
+> [!NOTE]
+> If you aren't interested in `minimumReleaseAge`, configure Renovate
+> as described in
+> ["Updating Chainguard Helm Charts in Helmfiles"](https://edu.chainguard.dev/chainguard/chainguard-images/staying-secure/updating-images/renovate/#updating-chainguard-helm-charts-in-helmfiles)
+> on Chainguard Academy.
+
 Sample manifest:
 
 ```yaml
@@ -43,12 +49,12 @@ To use this example:
   "packageRules": [
     {
       "matchManagers": ["helmfile"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^cgr\\.dev/my-org/(charts|iamguarded-charts)//"],
       "enabled": false
     },
     {
       "matchDatasources": ["custom.chainguard-repo"],
-      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^(charts|iamguarded-charts)//"],
       "versioning": "semver"
     }
   ],
@@ -56,7 +62,7 @@ To use this example:
     {
       "customType": "jsonata",
       "fileFormat": "yaml",
-      "fileMatch": ["(^|/)helmfile\\.ya?ml$"],
+      "managerFilePatterns": ["/(^|/)helmfile\\.ya?ml$/"],
       "matchStrings": [
         "releases[$contains(chart, 'cgr.dev/my-org/charts/') or $contains(chart, 'cgr.dev/my-org/iamguarded-charts/')].($pkg := $substringAfter($substringBefore(chart & '@', '@'), 'my-org/'); $name := $substringAfter($pkg, '/'); $exists(version) ? { 'depName': $name, 'packageName': $pkg, 'currentValue': version, 'currentDigest': $substringAfter(chart, '@') } : { 'depName': $name, 'packageName': $pkg, 'currentDigest': $substringAfter(chart, '@') })"
       ],

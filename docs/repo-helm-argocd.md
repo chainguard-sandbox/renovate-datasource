@@ -4,6 +4,12 @@ Example Renovate configuration that updates Chainguard chart references in
 an [ArgoCD `Application`](https://argo-cd.readthedocs.io/en/latest/user-guide/oci/)
 manifest.
 
+> [!NOTE]
+> If you aren't interested in `minimumReleaseAge`, configure Renovate
+> as described in
+> ["Updating Chainguard Helm Charts in ArgoCD Applications"](https://edu.chainguard.dev/chainguard/chainguard-images/staying-secure/updating-images/renovate/#updating-chainguard-helm-charts-in-argocd-applications)
+> on Chainguard Academy.
+
 Sample manifest:
 
 ```yaml
@@ -54,12 +60,12 @@ To use this example:
   "packageRules": [
     {
       "matchManagers": ["argocd"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^cgr\\.dev/my-org/(charts|iamguarded-charts)//"],
       "enabled": false
     },
     {
       "matchDatasources": ["custom.chainguard-repo"],
-      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^(charts|iamguarded-charts)//"],
       "versioning": "semver"
     }
   ],
@@ -67,7 +73,7 @@ To use this example:
     {
       "customType": "jsonata",
       "fileFormat": "yaml",
-      "fileMatch": ["\\.ya?ml$"],
+      "managerFilePatterns": ["/\\.ya?ml$/"],
       "matchStrings": [
         "spec.source[$contains(repoURL, 'cgr.dev/my-org/charts') or $contains(repoURL, 'cgr.dev/my-org/iamguarded-charts')].($sub := $substringAfter(repoURL, 'my-org/'); $tr := targetRevision; $substring($tr, 0, 7) = 'sha256:' ? { 'depName': chart, 'packageName': $sub & '/' & chart, 'currentDigest': $tr } : { 'depName': chart, 'packageName': $sub & '/' & chart, 'currentValue': $substringBefore($tr & '@', '@'), 'currentDigest': $substringAfter($tr, '@') })"
       ],

@@ -3,6 +3,12 @@
 Example Renovate configuration that updates Chainguard chart references in
 [Flux](https://fluxcd.io/) `OCIRepository` + `HelmRelease` manifests.
 
+> [!NOTE]
+> If you aren't interested in `minimumReleaseAge`, configure Renovate
+> as described in
+> ["Updating Chainguard Helm Charts in Flux"](https://edu.chainguard.dev/chainguard/chainguard-images/staying-secure/updating-images/renovate/#updating-chainguard-helm-charts-in-flux)
+> on Chainguard Academy.
+
 Sample manifest:
 
 ```yaml
@@ -44,7 +50,7 @@ To use this example:
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "flux": {
-    "fileMatch": ["(^|/)flux\\.ya?ml$", "(^|/)gotk-components\\.ya?ml$"]
+    "managerFilePatterns": ["/(^|/)flux\\.ya?ml$/", "/(^|/)gotk-components\\.ya?ml$/"]
   },
   "customDatasources": {
     "chainguard-repo": {
@@ -56,13 +62,13 @@ To use this example:
     {
       "matchManagers": ["flux"],
       "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^cgr\\.dev/my-org/(charts|iamguarded-charts)//"],
       "overrideDatasource": "custom.chainguard-repo",
       "overridePackageName": "{{{replace \"cgr.dev/my-org/\" \"\" packageName}}}"
     },
     {
       "matchDatasources": ["custom.chainguard-repo"],
-      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^(charts|iamguarded-charts)//"],
       "versioning": "semver"
     }
   ]

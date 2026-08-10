@@ -44,13 +44,13 @@ To use this example:
     {
       "matchManagers": ["helmv3"],
       "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^cgr\\.dev/my-org/(charts|iamguarded-charts)//"],
       "overrideDatasource": "custom.chainguard-repo",
       "overridePackageName": "{{{replace \"cgr.dev/my-org/\" \"\" packageName}}}"
     },
     {
       "matchDatasources": ["custom.chainguard-repo"],
-      "matchPackagePatterns": ["^(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["/^(charts|iamguarded-charts)//"],
       "versioning": "semver"
     }
   ]

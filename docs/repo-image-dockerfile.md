@@ -3,6 +3,12 @@
 Example Renovate configuration that updates Chainguard image references in
 a `Dockerfile` using the custom datasource.
 
+> [!NOTE]
+> If you aren't interested in `minimumReleaseAge`, configure Renovate
+> as described in
+> ["Updating versioned container images"](https://edu.chainguard.dev/chainguard/chainguard-images/staying-secure/updating-images/renovate/#updating-versioned-container-images)
+> on Chainguard Academy.
+
 Renovate's built-in `dockerfile` manager already extracts image references,
 so no custom manager is needed — we just redirect its lookups through the
 custom datasource so Renovate can honour the `minimumReleaseAge` window.
@@ -30,13 +36,13 @@ To use this example:
     {
       "matchManagers": ["dockerfile"],
       "matchDatasources": ["docker"],
-      "matchPackagePatterns": ["^cgr\\.dev/my-org/"],
+      "matchPackageNames": ["/^cgr\\.dev/my-org//"],
       "overrideDatasource": "custom.chainguard-repo",
       "overridePackageName": "{{{replace \"cgr.dev/my-org/\" \"\" packageName}}}"
     },
     {
       "matchDatasources": ["custom.chainguard-repo"],
-      "excludePackagePatterns": ["^(charts|iamguarded-charts)/"],
+      "matchPackageNames": ["!/^(charts|iamguarded-charts)//"],
       "versioning": "docker"
     }
   ]
