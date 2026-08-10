@@ -133,6 +133,25 @@ For a `--apk-repository` mirror that needs Basic auth, set
 export HTTP_AUTH="basic:<host>:<user>:<password>"
 ```
 
+### Architectures
+
+By default indexes are pulled for both `x86_64` and `aarch64`.
+
+Use `--apk-arch=<arch>` to only load a specific arch.
+
+```
+./renovate-datasource serve --org=my.org.com --datasource=apk \
+    --apk-arch=x86_64
+```
+
+The `?arch=<arch>` query parameter can be used to scope the response to a single
+architecture. Otherwise, the datasource returns a merged view of the versions
+across all the loaded indexes.
+
+```
+/v1/apk/curl/releases?arch=aarch64
+```
+
 ### Index Refresh
 
 The `--apk-index-refresh` flag defines how often the APKINDEX is refetched when

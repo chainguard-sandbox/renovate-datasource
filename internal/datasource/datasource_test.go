@@ -17,16 +17,16 @@ func TestAPKDatasource_ReleasesFiltersAndSorts(t *testing.T) {
 	store := apk.NewIndexStore()
 	store.Replace(map[string][]apk.PackageVersion{
 		"curl": {
-			{Version: "8.20.0-r0", Timestamp: day(30)},
-			{Version: "8.21.0-r0", Timestamp: day(15)},
-			{Version: "8.22.0-r0", Timestamp: day(1)},     // newer than 7d cutoff — filtered
-			{Version: "0.9.0-r0", Timestamp: time.Time{}}, // zero-ts — filtered (can't prove it's outside the window)
+			{Version: "8.20.0-r0", Timestamp: day(30), Arch: "x86_64"},
+			{Version: "8.21.0-r0", Timestamp: day(15), Arch: "x86_64"},
+			{Version: "8.22.0-r0", Timestamp: day(1), Arch: "x86_64"},     // newer than 7d cutoff — filtered
+			{Version: "0.9.0-r0", Timestamp: time.Time{}, Arch: "x86_64"}, // zero-ts — filtered (can't prove it's outside the window)
 		},
-	})
+	}, []string{"x86_64"})
 	ds := NewAPKDatasource(store)
 
 	before := now.Add(-7 * 24 * time.Hour)
-	got, err := ds.Releases(context.Background(), "curl", before)
+	got, err := ds.Releases(context.Background(), "curl", ReleasesOptions{Before: before})
 	if err != nil {
 		t.Fatalf("Releases: %v", err)
 	}
@@ -45,13 +45,13 @@ func TestAPKDatasource_ReleasesZeroBeforeReturnsEverything(t *testing.T) {
 	store := apk.NewIndexStore()
 	store.Replace(map[string][]apk.PackageVersion{
 		"curl": {
-			{Version: "1.0.0-r0", Timestamp: time.Unix(1, 0).UTC()},
-			{Version: "2.0.0-r0", Timestamp: time.Now().Add(time.Hour)}, // "future" — passes with zero before
+			{Version: "1.0.0-r0", Timestamp: time.Unix(1, 0).UTC(), Arch: "x86_64"},
+			{Version: "2.0.0-r0", Timestamp: time.Now().Add(time.Hour), Arch: "x86_64"}, // "future" — passes with zero before
 		},
-	})
+	}, []string{"x86_64"})
 	ds := NewAPKDatasource(store)
 
-	got, err := ds.Releases(context.Background(), "curl", time.Time{})
+	got, err := ds.Releases(context.Background(), "curl", ReleasesOptions{})
 	if err != nil {
 		t.Fatalf("Releases: %v", err)
 	}
@@ -60,9 +60,56 @@ func TestAPKDatasource_ReleasesZeroBeforeReturnsEverything(t *testing.T) {
 	}
 }
 
+func TestAPKDatasource_ReleasesArchFilter(t *testing.T) {
+	store := apk.NewIndexStore()
+	store.Replace(map[string][]apk.PackageVersion{
+		"curl": {
+			{Version: "1.0.0-r0", Arch: "x86_64"},
+			{Version: "1.0.0-r0", Arch: "aarch64"}, // same version on both archs
+			{Version: "2.0.0-r0", Arch: "x86_64"},  // x86_64-only
+			{Version: "3.0.0-r0", Arch: "aarch64"}, // aarch64-only
+		},
+	}, []string{"x86_64", "aarch64"})
+	ds := NewAPKDatasource(store)
+
+	// Merged view: three unique versions, dedupe collapses the shared 1.0.0-r0.
+	got, err := ds.Releases(context.Background(), "curl", ReleasesOptions{})
+	if err != nil {
+		t.Fatalf("merged Releases: %v", err)
+	}
+	if len(got) != 3 {
+		t.Errorf("merged len = %d, want 3 (%+v)", len(got), got)
+	}
+
+	// x86_64 view: 1.0.0 and 2.0.0.
+	got, err = ds.Releases(context.Background(), "curl", ReleasesOptions{Arch: "x86_64"})
+	if err != nil {
+		t.Fatalf("x86_64 Releases: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("x86_64 len = %d, want 2 (%+v)", len(got), got)
+	}
+
+	// aarch64 view: 1.0.0 and 3.0.0.
+	got, err = ds.Releases(context.Background(), "curl", ReleasesOptions{Arch: "aarch64"})
+	if err != nil {
+		t.Fatalf("aarch64 Releases: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("aarch64 len = %d, want 2 (%+v)", len(got), got)
+	}
+
+	// Unknown arch: InvalidArgumentError.
+	_, err = ds.Releases(context.Background(), "curl", ReleasesOptions{Arch: "riscv64"})
+	var invalidArg *InvalidArgumentError
+	if !errors.As(err, &invalidArg) {
+		t.Errorf("unknown arch: got err=%v, want *InvalidArgumentError", err)
+	}
+}
+
 func TestAPKDatasource_ReleasesUnknownName(t *testing.T) {
 	ds := NewAPKDatasource(apk.NewIndexStore())
-	_, err := ds.Releases(context.Background(), "nonesuch", time.Time{})
+	_, err := ds.Releases(context.Background(), "nonesuch", ReleasesOptions{})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -70,11 +117,11 @@ func TestAPKDatasource_ReleasesUnknownName(t *testing.T) {
 
 func TestAPKDatasource_ReleasesRejectsMalformedName(t *testing.T) {
 	store := apk.NewIndexStore()
-	store.Replace(map[string][]apk.PackageVersion{"curl": {{Version: "1"}}})
+	store.Replace(map[string][]apk.PackageVersion{"curl": {{Version: "1", Arch: "x86_64"}}}, []string{"x86_64"})
 	ds := NewAPKDatasource(store)
 
 	for _, name := range []string{"curl", "cmd:node", "so:libssl.so.3", "py3.14:setuptools", "nodejs-24", "Catch2", "ImageMagick", "cmd:["} {
-		if _, err := ds.Releases(context.Background(), name, time.Time{}); err != nil {
+		if _, err := ds.Releases(context.Background(), name, ReleasesOptions{}); err != nil {
 			var invalid *InvalidPackageNameError
 			if errors.As(err, &invalid) {
 				t.Errorf("%q rejected as malformed: %v", name, err)
@@ -83,7 +130,7 @@ func TestAPKDatasource_ReleasesRejectsMalformedName(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"", "../escape", "has space", ".hidden", "foo/bar", "\x00null"} {
-		_, err := ds.Releases(context.Background(), name, time.Time{})
+		_, err := ds.Releases(context.Background(), name, ReleasesOptions{})
 		var invalid *InvalidPackageNameError
 		if !errors.As(err, &invalid) {
 			t.Errorf("%q: got err=%v, want *InvalidPackageNameError", name, err)
@@ -98,12 +145,12 @@ func TestRepoDatasource_ReleasesRejectsMalformedName(t *testing.T) {
 	}}, 0)
 
 	for _, name := range []string{"python", "charts/nginx"} {
-		if _, err := ds.Releases(context.Background(), name, time.Time{}); err != nil {
+		if _, err := ds.Releases(context.Background(), name, ReleasesOptions{}); err != nil {
 			t.Errorf("%q rejected: %v", name, err)
 		}
 	}
 	for _, name := range []string{"", "../escape", "has space", "TRAILING/", "/leading", ".dotfile"} {
-		_, err := ds.Releases(context.Background(), name, time.Time{})
+		_, err := ds.Releases(context.Background(), name, ReleasesOptions{})
 		var invalid *InvalidPackageNameError
 		if !errors.As(err, &invalid) {
 			t.Errorf("%q: got err=%v, want *InvalidPackageNameError", name, err)
@@ -117,7 +164,7 @@ func TestAPKDatasource_Ready(t *testing.T) {
 	if err := ds.Ready(context.Background()); err == nil {
 		t.Error("empty store: expected error, got nil")
 	}
-	store.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1"}}})
+	store.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1", Arch: "x86_64"}}}, []string{"x86_64"})
 	if err := ds.Ready(context.Background()); err != nil {
 		t.Errorf("populated store: unexpected error %v", err)
 	}
@@ -158,7 +205,7 @@ func TestRepoDatasource_ReleasesZeroBeforePassesThrough(t *testing.T) {
 	}}
 	ds := NewRepoDatasource(backend, 0)
 
-	got, err := ds.Releases(context.Background(), "python", time.Time{})
+	got, err := ds.Releases(context.Background(), "python", ReleasesOptions{})
 	if err != nil {
 		t.Fatalf("Releases: %v", err)
 	}
@@ -172,7 +219,7 @@ func TestRepoDatasource_ReleasesZeroBeforePassesThrough(t *testing.T) {
 
 func TestRepoDatasource_ReleasesUnknownRepoMapsToErrNotFound(t *testing.T) {
 	ds := NewRepoDatasource(&repoStub{}, 0)
-	_, err := ds.Releases(context.Background(), "nonesuch", time.Time{})
+	_, err := ds.Releases(context.Background(), "nonesuch", ReleasesOptions{})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}

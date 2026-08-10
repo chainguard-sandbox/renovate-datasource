@@ -37,6 +37,29 @@ type InvalidPackageNameError struct{ Message string }
 // Error returns the client-facing message verbatim.
 func (e *InvalidPackageNameError) Error() string { return e.Message }
 
+// InvalidArgumentError is returned by Datasource.Releases when a
+// caller-supplied option (e.g. ?arch=) isn't supported by the
+// datasource. Message is safe to surface as an HTTP 400 body.
+type InvalidArgumentError struct{ Message string }
+
+// Error returns the client-facing message verbatim.
+func (e *InvalidArgumentError) Error() string { return e.Message }
+
+// ReleasesOptions narrows a Releases() call. Zero-value fields are
+// ignored; fields that don't apply to a given datasource are also
+// ignored (e.g. Arch for the repo datasource).
+type ReleasesOptions struct {
+	// Before drops releases whose timestamp is after this instant.
+	// Zero disables the filter entirely; callers precompute
+	// before = now.Add(-minimumReleaseAge).
+	Before time.Time
+
+	// Arch narrows apk responses to a single architecture. Empty
+	// returns the merged view across every loaded arch. Ignored by
+	// datasources that aren't arch-scoped.
+	Arch string
+}
+
 // Datasource is the read-only view onto one datasource. Both the HTTP
 // server and the snapshot generator go through this — server builds
 // per-request responses, snapshot iterates every entry.
@@ -47,19 +70,16 @@ type Datasource interface {
 	// "charts/nginx" for repo).
 	PackageNames(ctx context.Context) ([]string, error)
 
-	// Releases returns the releases for packageName. If before is
-	// non-zero, releases whose timestamp is after that instant are
-	// filtered out; callers precompute before =
-	// now.Add(-minimumReleaseAge) so the same cutoff can be shared
-	// across every Releases call in a batch. Zero before disables
-	// the filter entirely.
+	// Releases returns the releases for packageName filtered by
+	// opts.
 	//
 	// Malformed packageNames produce a *InvalidPackageNameError so a
 	// bad URL segment turns into a 400 rather than falling through
 	// to a lookup. Unknown but well-formed packageNames produce
 	// ErrNotFound so callers can distinguish 404 from real backend
-	// failures.
-	Releases(ctx context.Context, packageName string, before time.Time) ([]Release, error)
+	// failures. Unsupported option values (e.g. an arch the
+	// datasource doesn't serve) produce an *InvalidArgumentError.
+	Releases(ctx context.Context, packageName string, opts ReleasesOptions) ([]Release, error)
 
 	// Ready reports whether the source is usable. Implementations
 	// should keep this cheap — no network calls — so /readyz can

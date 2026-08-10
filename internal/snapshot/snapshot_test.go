@@ -37,7 +37,7 @@ func (f *fakeDatasource) PackageNames(_ context.Context) ([]string, error) {
 	return out, nil
 }
 
-func (f *fakeDatasource) Releases(_ context.Context, name string, _ time.Time) ([]datasource.Release, error) {
+func (f *fakeDatasource) Releases(_ context.Context, name string, _ datasource.ReleasesOptions) ([]datasource.Release, error) {
 	if f.relErr != nil {
 		return nil, f.relErr
 	}
@@ -257,9 +257,9 @@ type observerDatasource struct {
 func (o *observerDatasource) PackageNames(ctx context.Context) ([]string, error) {
 	return o.inner.PackageNames(ctx)
 }
-func (o *observerDatasource) Releases(ctx context.Context, name string, before time.Time) ([]datasource.Release, error) {
+func (o *observerDatasource) Releases(ctx context.Context, name string, opts datasource.ReleasesOptions) ([]datasource.Release, error) {
 	o.onRelease()
-	return o.inner.Releases(ctx, name, before)
+	return o.inner.Releases(ctx, name, opts)
 }
 func (o *observerDatasource) Ready(ctx context.Context) error { return o.inner.Ready(ctx) }
 
@@ -269,8 +269,8 @@ func TestAPKDatasource_SnapshotShape(t *testing.T) {
 	now := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
 	store := apk.NewIndexStore()
 	store.Replace(map[string][]apk.PackageVersion{
-		"curl": {{Version: "8.21.0-r1", Timestamp: now.AddDate(0, 0, -30)}},
-	})
+		"curl": {{Version: "8.21.0-r1", Timestamp: now.AddDate(0, 0, -30), Arch: "x86_64"}},
+	}, []string{"x86_64"})
 	ds := datasource.NewAPKDatasource(store)
 
 	out := filepath.Join(t.TempDir(), "snap")

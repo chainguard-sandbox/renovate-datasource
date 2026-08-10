@@ -182,11 +182,11 @@ func TestRepositoriesFromURLs_LoadsThroughLiveServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RepositoriesFromURLs: %v", err)
 	}
-	store, err := NewIndexStoreWithRefresh(context.Background(), "x86_64", repos, 0, slog.Default())
+	store, err := NewIndexStoreWithRefresh(context.Background(), []string{"x86_64"},repos, 0, slog.Default())
 	if err != nil {
 		t.Fatalf("NewIndexStoreWithRefresh: %v", err)
 	}
-	if got := store.Get("foo"); len(got) == 0 || got[0].Version != "1.2.3-r0" {
+	if got := store.Get("foo", ""); len(got) == 0 || got[0].Version != "1.2.3-r0" {
 		t.Errorf("Get(foo) = %+v, want a 1.2.3-r0 entry", got)
 	}
 	if gotAuth != "" {
@@ -203,11 +203,84 @@ func TestRepositoriesFromURLs_LoadsThroughLiveServer(t *testing.T) {
 		Auth:    func(_ context.Context) (string, error) { return "alice:s3cret", nil },
 	}}
 	gotAuth = ""
-	if _, err := NewIndexStoreWithRefresh(context.Background(), "x86_64", authRepos, 0, slog.Default()); err != nil {
+	if _, err := NewIndexStoreWithRefresh(context.Background(), []string{"x86_64"},authRepos, 0, slog.Default()); err != nil {
 		t.Fatalf("auth load: %v", err)
 	}
 	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:s3cret"))
 	if gotAuth != want {
 		t.Errorf("Authorization header = %q, want %q", gotAuth, want)
+	}
+}
+
+// TestNewIndexStoreWithRefresh_MultiArch verifies that both configured
+// archs are fetched, each entry is tagged with its arch, and the
+// store's Archs() reports the set installed.
+func TestNewIndexStoreWithRefresh_MultiArch(t *testing.T) {
+	x86Body := "P:foo\nV:1.0.0-r0\nt:1700000000\n\nP:x86only\nV:9.0.0-r0\nt:1700000000\n"
+	armBody := "P:foo\nV:1.0.0-r0\nt:1700000000\n\nP:armonly\nV:2.0.0-r0\nt:1700000000\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/x86_64/APKINDEX.tar.gz":
+			_, _ = w.Write(makeIndex(t, x86Body).Bytes())
+		case "/aarch64/APKINDEX.tar.gz":
+			_, _ = w.Write(makeIndex(t, armBody).Bytes())
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	repos, err := RepositoriesFromURLs([]string{srv.URL})
+	if err != nil {
+		t.Fatalf("RepositoriesFromURLs: %v", err)
+	}
+	store, err := NewIndexStoreWithRefresh(context.Background(), []string{"x86_64", "aarch64"}, repos, 0, slog.Default())
+	if err != nil {
+		t.Fatalf("NewIndexStoreWithRefresh: %v", err)
+	}
+	if archs := store.Archs(); len(archs) != 2 {
+		t.Errorf("Archs = %v, want two entries", archs)
+	}
+	if got := store.Get("foo", ""); len(got) != 2 {
+		t.Errorf("Get(foo, merged) len = %d, want 2 (one per arch)", len(got))
+	}
+	if got := store.Get("foo", "x86_64"); len(got) != 1 || got[0].Arch != "x86_64" {
+		t.Errorf("Get(foo, x86_64) = %+v, want one x86_64 entry", got)
+	}
+	if got := store.Get("x86only", "aarch64"); got != nil {
+		t.Errorf("Get(x86only, aarch64) = %+v, want nil", got)
+	}
+	if got := store.Get("armonly", "aarch64"); len(got) != 1 {
+		t.Errorf("Get(armonly, aarch64) = %+v, want one entry", got)
+	}
+}
+
+// TestNewIndexStoreWithRefresh_MissingArchHardFails verifies that a
+// (repo, arch) pair returning 404 causes the initial Load to error
+// out — Chainguard's contract guarantees every arch on every repo, so
+// a missing one is surfaced rather than silently ignored.
+func TestNewIndexStoreWithRefresh_MissingArchHardFails(t *testing.T) {
+	body := "P:foo\nV:1.0.0-r0\nt:1700000000\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/x86_64/APKINDEX.tar.gz" {
+			_, _ = w.Write(makeIndex(t, body).Bytes())
+			return
+		}
+		http.Error(w, "no such arch", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	repos, err := RepositoriesFromURLs([]string{srv.URL})
+	if err != nil {
+		t.Fatalf("RepositoriesFromURLs: %v", err)
+	}
+	store, err := NewIndexStoreWithRefresh(context.Background(), []string{"x86_64", "aarch64"}, repos, 0, slog.Default())
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if store.Len() != 0 {
+		t.Errorf("store should be empty on hard-fail, got %d packages", store.Len())
 	}
 }

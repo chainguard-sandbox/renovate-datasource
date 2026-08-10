@@ -23,6 +23,7 @@ type snapshotOptions struct {
 	maxReleaseAge     time.Duration
 	concurrency       int
 	apkRepositories   []string
+	apkArchs          []string
 	datasources       []string
 	logLevel          string
 
@@ -77,6 +78,7 @@ Examples:
 	cmd.Flags().DurationVar(&opts.maxReleaseAge, "max-release-age", 0, "drop releases older than this (Go duration, e.g. 4380h for ~6 months) and skip packages/repos with nothing in the window. 0 (default) disables it.")
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 16, "cap on concurrent platform-API calls; also drives the per-package fan-out inside each source and the per-repo history fan-out")
 	cmd.Flags().StringSliceVar(&opts.apkRepositories, "apk-repository", nil, "apk repository root URL (repeatable, comma-separated). When set, overrides the default apk.cgr.dev/virtualapk.cgr.dev chain. Auth is picked up from HTTP_AUTH (format: basic:<host>:<user>:<password>).")
+	cmd.Flags().StringSliceVar(&opts.apkArchs, "apk-arch", []string{"x86_64", "aarch64"}, "architectures to load APKINDEX for (repeatable, comma-separated). Each configured repo must serve every listed arch or the snapshot fails.")
 	cmd.Flags().StringSliceVar(&opts.datasources, "datasource", []string{"repo", "apk"}, "comma-separated list of datasources to snapshot (repo, apk).")
 	cmd.Flags().StringVar(&opts.logLevel, "log-level", "info", "log level: debug, info, warn, error")
 	cmd.Flags().StringVar(&opts.identity, "identity", "", "UIDP of an assumable Chainguard identity (enables identity auth)")
@@ -121,14 +123,13 @@ func runSnapshot(parent context.Context, opts *snapshotOptions) error {
 	}
 
 	if enableAPK {
-		const apkArch = "x86_64"
 		apkRepos, err := resolveAPKRepositories(ctx, cg, opts.apkRepositories)
 		if err != nil {
 			return err
 		}
 		// One-shot: interval=0 skips the background refresh; only
 		// the initial synchronous load runs.
-		store, err := apk.NewIndexStoreWithRefresh(ctx, apkArch, apkRepos, 0, log)
+		store, err := apk.NewIndexStoreWithRefresh(ctx, opts.apkArchs, apkRepos, 0, log)
 		if err != nil {
 			return fmt.Errorf("loading apk indexes: %w", err)
 		}

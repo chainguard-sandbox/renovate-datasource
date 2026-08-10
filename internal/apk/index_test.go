@@ -57,7 +57,7 @@ func TestParseIndex(t *testing.T) {
 	}, "\n")
 
 	out := newIndexData()
-	n, err := parseIndex(makeIndex(t, body), out)
+	n, err := parseIndex(makeIndex(t, body), "x86_64", out)
 	if err != nil {
 		t.Fatalf("parseIndex: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestParseIndex_TrailingRecordWithoutBlankLine(t *testing.T) {
 	// APKINDEX would silently drop.
 	body := "P:foo\nV:1.0.0-r0\nt:1700000000"
 	out := newIndexData()
-	if _, err := parseIndex(makeIndex(t, body), out); err != nil {
+	if _, err := parseIndex(makeIndex(t, body), "x86_64", out); err != nil {
 		t.Fatalf("parseIndex: %v", err)
 	}
 	if len(out.releases["foo"]) != 1 {
@@ -110,7 +110,7 @@ func TestParseIndex_SkipsMalformedRecords(t *testing.T) {
 	}, "\n")
 
 	out := newIndexData()
-	if _, err := parseIndex(makeIndex(t, body), out); err != nil {
+	if _, err := parseIndex(makeIndex(t, body), "x86_64", out); err != nil {
 		t.Fatalf("parseIndex: %v", err)
 	}
 	if _, ok := out.releases["only-name"]; ok {
@@ -138,7 +138,7 @@ func TestParseIndex_CapturesProvides(t *testing.T) {
 	}, "\n")
 
 	out := newIndexData()
-	if _, err := parseIndex(makeIndex(t, body), out); err != nil {
+	if _, err := parseIndex(makeIndex(t, body), "x86_64", out); err != nil {
 		t.Fatalf("parseIndex: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestParseIndex_SkipsUnversionedProvides(t *testing.T) {
 	}, "\n")
 
 	out := newIndexData()
-	if _, err := parseIndex(makeIndex(t, body), out); err != nil {
+	if _, err := parseIndex(makeIndex(t, body), "x86_64", out); err != nil {
 		t.Fatalf("parseIndex: %v", err)
 	}
 	if _, ok := out.releases["python-3"]; ok {
@@ -240,7 +240,7 @@ func TestNewIndexStoreWithRefresh_NoReposReturnsEmptyStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	store, err := NewIndexStoreWithRefresh(ctx, "x86_64", nil, 0, log)
+	store, err := NewIndexStoreWithRefresh(ctx, []string{"x86_64"}, nil, 0, log)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -250,26 +250,35 @@ func TestNewIndexStoreWithRefresh_NoReposReturnsEmptyStore(t *testing.T) {
 	if store.Len() != 0 {
 		t.Errorf("empty store Len = %d, want 0", store.Len())
 	}
-	if got := store.Get("anything"); got != nil {
+	if got := store.Get("anything", ""); got != nil {
 		t.Errorf("Get on empty store = %+v, want nil", got)
 	}
 }
 
 func TestIndexStore_GetAndReplace(t *testing.T) {
 	s := NewIndexStore()
-	if got := s.Get("missing"); got != nil {
+	if got := s.Get("missing", ""); got != nil {
 		t.Errorf("Get on empty store = %v, want nil", got)
 	}
 	s.Replace(map[string][]PackageVersion{
-		"foo": {{Version: "1", Timestamp: time.Unix(1, 0)}},
-	})
-	got := s.Get("foo")
+		"foo": {{Version: "1", Timestamp: time.Unix(1, 0), Arch: "x86_64"}},
+	}, []string{"x86_64"})
+	got := s.Get("foo", "")
 	if len(got) != 1 || got[0].Version != "1" {
 		t.Fatalf("Get after Replace = %+v, want foo@1", got)
 	}
 	// Mutating the returned slice must not affect the store.
 	got[0].Version = "mutated"
-	if s.Get("foo")[0].Version != "1" {
+	if s.Get("foo", "")[0].Version != "1" {
 		t.Errorf("Get should return a copy; store was mutated")
+	}
+	if got := s.Get("foo", "x86_64"); len(got) != 1 {
+		t.Errorf("Get(foo, x86_64) = %+v, want one entry", got)
+	}
+	if got := s.Get("foo", "aarch64"); got != nil {
+		t.Errorf("Get(foo, aarch64) = %+v, want nil (no aarch64 entries)", got)
+	}
+	if archs := s.Archs(); len(archs) != 1 || archs[0] != "x86_64" {
+		t.Errorf("Archs() = %v, want [x86_64]", archs)
 	}
 }

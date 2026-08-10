@@ -26,6 +26,7 @@ type serveOptions struct {
 	concurrency       int
 	apkIndexRefresh   time.Duration
 	apkRepositories   []string
+	apkArchs          []string
 	datasources       []string
 	logLevel          string
 
@@ -78,6 +79,7 @@ Examples:
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 16, "cap on concurrent platform-API calls (ListTags, ListTagHistory, ListAllRepos); also bounds per-request history fan-out")
 	cmd.Flags().DurationVar(&opts.apkIndexRefresh, "apk-index-refresh", time.Hour, "how often to re-fetch the apk indexes served under /v1/apk/{name}/releases. 0 disables the background refresh (indexes are still loaded once at startup).")
 	cmd.Flags().StringSliceVar(&opts.apkRepositories, "apk-repository", nil, "apk repository root URL (repeatable, comma-separated). When set, overrides the default apk.cgr.dev/virtualapk.cgr.dev chain. Auth is picked up from HTTP_AUTH (format: basic:<host>:<user>:<password>).")
+	cmd.Flags().StringSliceVar(&opts.apkArchs, "apk-arch", []string{"x86_64", "aarch64"}, "architectures to load APKINDEX for (repeatable, comma-separated). Each configured repo must serve every listed arch or startup fails.")
 	cmd.Flags().StringSliceVar(&opts.datasources, "datasource", []string{"repo", "apk"}, "select which datasources to expose (repo, apk). Repo-only skips the APK index fetch and apk.cgr.dev token exchange at startup.")
 	cmd.Flags().StringVar(&opts.logLevel, "log-level", "info", "log level: debug, info, warn, error")
 	cmd.Flags().StringVar(&opts.identity, "identity", "", "UIDP of an assumable Chainguard identity (enables identity auth)")
@@ -123,7 +125,6 @@ func runServe(parent context.Context, opts *serveOptions) error {
 	}
 	if enableAPK {
 		// APK repository chain feeding the /v1/apk/{name}/releases index.
-		const apkArch = "x86_64"
 		apkRepos, err := resolveAPKRepositories(ctx, cg, opts.apkRepositories)
 		if err != nil {
 			return err
@@ -132,7 +133,7 @@ func runServe(parent context.Context, opts *serveOptions) error {
 		// Initial load blocks so /v1/apk/{name}/releases is warm as soon
 		// as the listener comes up; refresh continues in the background
 		// tied to ctx.
-		apkStore, err := apk.NewIndexStoreWithRefresh(ctx, apkArch, apkRepos, opts.apkIndexRefresh, log)
+		apkStore, err := apk.NewIndexStoreWithRefresh(ctx, opts.apkArchs, apkRepos, opts.apkIndexRefresh, log)
 		if err != nil {
 			log.Warn("initial apk index load failed; /v1/apk/{name}/releases will 404 until the next successful refresh", "err", err)
 		}

@@ -161,7 +161,7 @@ func Generate(ctx context.Context, outputDir string, opts ...Option) error {
 				if err := egCtx.Err(); err != nil {
 					return err
 				}
-				releases, err := ds.Releases(egCtx, pkg, minReleaseAgeBefore)
+				releases, err := ds.Releases(egCtx, pkg, datasource.ReleasesOptions{Before: minReleaseAgeBefore})
 				if err != nil {
 					if errors.Is(err, datasource.ErrNotFound) {
 						// Race: PackageNames listed it, Releases didn't find

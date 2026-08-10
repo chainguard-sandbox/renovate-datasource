@@ -47,7 +47,23 @@ func (b *stubReleasesBackend) Ready(_ context.Context) error { return b.readyErr
 // without touching the network.
 func buildAPKDatasource(entries map[string][]apk.PackageVersion) *datasource.APKDatasource {
 	store := apk.NewIndexStore()
-	store.Replace(entries)
+	archSet := map[string]struct{}{}
+	for _, versions := range entries {
+		for i := range versions {
+			if versions[i].Arch == "" {
+				versions[i].Arch = "x86_64"
+			}
+			archSet[versions[i].Arch] = struct{}{}
+		}
+	}
+	archs := make([]string, 0, len(archSet))
+	for a := range archSet {
+		archs = append(archs, a)
+	}
+	if len(archs) == 0 {
+		archs = []string{"x86_64"}
+	}
+	store.Replace(entries, archs)
 	return datasource.NewAPKDatasource(store)
 }
 
@@ -91,7 +107,7 @@ func TestReadyz_APKDatasourceEmpty(t *testing.T) {
 
 func TestReadyz_APKDatasourcePopulated(t *testing.T) {
 	store := apk.NewIndexStore()
-	store.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1.0.0"}}})
+	store.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1.0.0", Arch: "x86_64"}}}, []string{"x86_64"})
 	h := New(WithAPKDatasource(datasource.NewAPKDatasource(store))).Handler()
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -111,7 +127,7 @@ func TestReadyz_APKDatasourcePopulated(t *testing.T) {
 func TestDatasource_RouteRegistration(t *testing.T) {
 	apkDS := datasource.NewAPKDatasource(func() *apk.IndexStore {
 		s := apk.NewIndexStore()
-		s.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1.0.0", Timestamp: time.Unix(1, 0).UTC()}}})
+		s.Replace(map[string][]apk.PackageVersion{"foo": {{Version: "1.0.0", Timestamp: time.Unix(1, 0).UTC(), Arch: "x86_64"}}}, []string{"x86_64"})
 		return s
 	}())
 	repoDS := datasource.NewRepoDatasource(&stubReleasesBackend{tags: []chainguard.Tag{
@@ -462,6 +478,48 @@ func TestHandleAPKReleases_PrefixedProvidesName(t *testing.T) {
 	}
 	if len(resp.Releases) != 1 || resp.Releases[0].Version != "24.14.0-r0" {
 		t.Errorf("releases = %+v, want one entry at 24.14.0-r0", resp.Releases)
+	}
+}
+
+func TestHandleAPKReleases_ArchQueryParam(t *testing.T) {
+	ds := buildAPKDatasource(map[string][]apk.PackageVersion{
+		"curl": {
+			{Version: "1.0.0-r0", Timestamp: time.Unix(1_700_000_000, 0).UTC(), Arch: "x86_64"},
+			{Version: "1.0.0-r0", Timestamp: time.Unix(1_700_000_000, 0).UTC(), Arch: "aarch64"},
+			{Version: "2.0.0-r0", Timestamp: time.Unix(1_700_000_000, 0).UTC(), Arch: "x86_64"},
+		},
+	})
+	h := New(WithAPKDatasource(ds)).Handler()
+
+	// Merged (no ?arch=): both versions.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apk/curl/releases", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("merged status = %d, want 200", rec.Code)
+	}
+	var merged datasource.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &merged)
+	if len(merged.Releases) != 2 {
+		t.Errorf("merged releases = %d, want 2", len(merged.Releases))
+	}
+
+	// ?arch=aarch64: one version.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apk/curl/releases?arch=aarch64", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("aarch64 status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var arm datasource.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &arm)
+	if len(arm.Releases) != 1 || arm.Releases[0].Version != "1.0.0-r0" {
+		t.Errorf("aarch64 releases = %+v, want one 1.0.0-r0 entry", arm.Releases)
+	}
+
+	// ?arch=riscv64: 400.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/apk/curl/releases?arch=riscv64", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown arch status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 	}
 }
 

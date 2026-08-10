@@ -3,9 +3,10 @@ package datasource
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"sort"
-	"time"
 
 	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
 )
@@ -48,16 +49,35 @@ func (s *APKDatasource) Ready(_ context.Context) error {
 }
 
 // Releases returns the timestamp-descending release list for
-// packageName, dropping entries newer than before when it's
-// non-zero. Malformed packageNames produce *InvalidPackageNameError;
-// unknown but valid names produce ErrNotFound.
-func (s *APKDatasource) Releases(_ context.Context, packageName string, before time.Time) ([]Release, error) {
+// packageName.
+//
+// Options:
+//
+//   - opts.Before: when non-zero, entries newer than the
+//     cutoff (and entries with no timestamp at all) are dropped.
+//   - opts.Arch: when non-empty, only entries built for that arch are
+//     returned; an arch the store wasn't loaded with produces
+//     *InvalidArgumentError.
+//
+// Malformed packageNames produce *InvalidPackageNameError; unknown
+// but valid names produce ErrNotFound.
+func (s *APKDatasource) Releases(_ context.Context, packageName string, opts ReleasesOptions) ([]Release, error) {
 	if !apkProvidesNamePattern.MatchString(packageName) {
 		return nil, &InvalidPackageNameError{Message: "The apk package name isn't well-formed."}
 	}
-	entries := s.Store.Get(packageName)
+	if opts.Arch != "" && !slices.Contains(s.Store.Archs(), opts.Arch) {
+		return nil, &InvalidArgumentError{Message: fmt.Sprintf("The arch %q isn't served by this instance.", opts.Arch)}
+	}
+	entries := s.Store.Get(packageName, opts.Arch)
 	if entries == nil {
 		return nil, ErrNotFound
+	}
+	// When opts.Arch is empty the store returns entries from every
+	// loaded arch; collapse to one entry per version, keeping the
+	// latest timestamp. When opts.Arch is set the store already
+	// scoped to that arch so the merge is a no-op.
+	if opts.Arch == "" {
+		entries = mergeAcrossArchs(entries)
 	}
 	out := make([]Release, 0, len(entries))
 	for _, e := range entries {
@@ -65,7 +85,7 @@ func (s *APKDatasource) Releases(_ context.Context, packageName string, before t
 		// can't prove sit outside the window: anything with a
 		// timestamp after the cutoff, and anything with no timestamp
 		// at all (we have no evidence it isn't fresh).
-		if !before.IsZero() && (e.Timestamp.IsZero() || e.Timestamp.After(before)) {
+		if !opts.Before.IsZero() && (e.Timestamp.IsZero() || e.Timestamp.After(opts.Before)) {
 			continue
 		}
 		out = append(out, Release{
@@ -84,4 +104,25 @@ func (s *APKDatasource) Releases(_ context.Context, packageName string, before t
 		return out[i].Version > out[j].Version
 	})
 	return out, nil
+}
+
+// mergeAcrossArchs collapses entries with the same Version, keeping
+// the one with the latest Timestamp. Used when opts.Arch is empty so
+// a package present on multiple archs shows up once in the response.
+func mergeAcrossArchs(entries []apk.PackageVersion) []apk.PackageVersion {
+	byVersion := make(map[string]apk.PackageVersion, len(entries))
+	for _, e := range entries {
+		existing, ok := byVersion[e.Version]
+		if !ok || e.Timestamp.After(existing.Timestamp) {
+			byVersion[e.Version] = e
+		}
+	}
+	if len(byVersion) == len(entries) {
+		return entries
+	}
+	out := make([]apk.PackageVersion, 0, len(byVersion))
+	for _, e := range byVersion {
+		out = append(out, e)
+	}
+	return out
 }
