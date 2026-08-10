@@ -1,0 +1,16 @@
+# Binary produced by `go build ./cmd/renovate-datasource` at the repo root.
+/renovate-datasource
+
+# Go test / coverage output.
+*.test
+*.out
+coverage.txt
+
+# Editor and OS cruft.
+.idea/
+.vscode/
+.DS_Store
+
+# Local env overrides.
+.env
+.env.*
