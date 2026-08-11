@@ -215,3 +215,85 @@ func TestApplyMinimumReleaseAge_FansOutHistoryCalls(t *testing.T) {
 		t.Errorf("peak in-flight history calls = %d, want close to %d", peak.Load(), concurrency)
 	}
 }
+
+func TestRepoDatasource_ReleasesRejectsMalformedName(t *testing.T) {
+	ds := NewRepoDatasource(&repoStub{tags: map[string][]chainguard.Tag{
+		"python":       {{ID: "1", Name: "3.14", LastUpdated: time.Now(), Digest: "sha256:x"}},
+		"charts/nginx": {{ID: "2", Name: "22", LastUpdated: time.Now(), Digest: "sha256:y"}},
+	}}, 0)
+
+	for _, name := range []string{"python", "charts/nginx"} {
+		if _, err := ds.Releases(context.Background(), name, ReleasesOptions{}); err != nil {
+			t.Errorf("%q rejected: %v", name, err)
+		}
+	}
+	for _, name := range []string{"", "../escape", "has space", "TRAILING/", "/leading", ".dotfile"} {
+		_, err := ds.Releases(context.Background(), name, ReleasesOptions{})
+		var invalid *InvalidPackageNameError
+		if !errors.As(err, &invalid) {
+			t.Errorf("%q: got err=%v, want *InvalidPackageNameError", name, err)
+		}
+	}
+}
+
+func TestRepoDatasource_ReleasesZeroBeforePassesThrough(t *testing.T) {
+	backend := &repoStub{tags: map[string][]chainguard.Tag{
+		"python": {{ID: "1", Name: "3.14", LastUpdated: time.Now(), Digest: "sha256:x"}},
+	}}
+	ds := NewRepoDatasource(backend, 0)
+
+	got, err := ds.Releases(context.Background(), "python", ReleasesOptions{})
+	if err != nil {
+		t.Fatalf("Releases: %v", err)
+	}
+	if len(got) != 1 || got[0].Version != "3.14" {
+		t.Errorf("got %+v", got)
+	}
+	if backend.histCalls != 0 {
+		t.Errorf("history calls = %d, want 0 (zero before should short-circuit)", backend.histCalls)
+	}
+}
+
+func TestRepoDatasource_ReleasesUnknownRepoMapsToErrNotFound(t *testing.T) {
+	ds := NewRepoDatasource(&repoStub{}, 0)
+	_, err := ds.Releases(context.Background(), "nonesuch", ReleasesOptions{})
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRepoDatasource_Ready(t *testing.T) {
+	ds := NewRepoDatasource(&repoStub{}, 0)
+	if err := ds.Ready(context.Background()); err != nil {
+		t.Errorf("Ready: %v", err)
+	}
+}
+
+type repoStub struct {
+	tags       map[string][]chainguard.Tag
+	tagsErr    error
+	allRepos   []string
+	allErr     error
+	histCalls  int
+	histResult []chainguard.TagHistory
+	readyErr   error
+}
+
+func (b *repoStub) ListAllRepos(_ context.Context) ([]string, error) {
+	return b.allRepos, b.allErr
+}
+func (b *repoStub) ListTags(_ context.Context, repo string) ([]chainguard.Tag, error) {
+	if b.tagsErr != nil {
+		return nil, b.tagsErr
+	}
+	tags, ok := b.tags[repo]
+	if !ok {
+		return nil, chainguard.ErrRepoNotFound
+	}
+	return tags, nil
+}
+func (b *repoStub) ListTagHistory(_ context.Context, _ string) ([]chainguard.TagHistory, error) {
+	b.histCalls++
+	return b.histResult, nil
+}
+func (b *repoStub) Ready(_ context.Context) error { return b.readyErr }
