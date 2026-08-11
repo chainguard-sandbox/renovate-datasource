@@ -11,8 +11,7 @@ const defaultMinimumReleaseAge = 0
 
 type options struct {
 	minimumReleaseAge time.Duration
-	repoDatasource    datasource.Datasource
-	apkDatasource     datasource.Datasource
+	datasources       map[string]datasource.Datasource
 	log               *slog.Logger
 	now               func() time.Time
 }
@@ -22,8 +21,7 @@ type Option func(*options)
 
 // WithMinimumReleaseAge sets the default window applied when a request
 // doesn't provide its own ?minimumReleaseAge=<dur> query parameter.
-// Default is 0 (disabled), in which case /v1/repo/{repo}/releases serves
-// the upstream tag list as-is, skipping the per-tag history rewind.
+// Default is 0 (disabled), which passes releases through unfiltered.
 func WithMinimumReleaseAge(d time.Duration) Option {
 	return func(o *options) { o.minimumReleaseAge = d }
 }
@@ -33,14 +31,14 @@ func WithLogger(l *slog.Logger) Option {
 	return func(o *options) { o.log = l }
 }
 
-// WithRepoDatasource attaches the source that serves /v1/repo/{path}/releases.
-// Omitting it leaves the route unregistered (404).
-func WithRepoDatasource(ds datasource.Datasource) Option {
-	return func(o *options) { o.repoDatasource = ds }
-}
-
-// WithAPKDatasource attaches the source that serves /v1/apk/{name}/releases.
-// Omitting it leaves the route unregistered (404).
-func WithAPKDatasource(ds datasource.Datasource) Option {
-	return func(o *options) { o.apkDatasource = ds }
+// WithDatasource attaches ds under name, serving it at
+// /v1/<name>/{package}/releases. Omit to leave the route unregistered.
+// The last registration wins if name is reused.
+func WithDatasource(name string, ds datasource.Datasource) Option {
+	return func(o *options) {
+		if o.datasources == nil {
+			o.datasources = map[string]datasource.Datasource{}
+		}
+		o.datasources[name] = ds
+	}
 }

@@ -1,12 +1,11 @@
-// Package server exposes the /releases endpoints Renovate consumes
-// as a custom datasource. Datasources plug in via Options; the mux
-// dispatches everything under /v1/repo and /v1/apk to a single
-// shared handler body.
+// Package server exposes the /releases endpoints Renovate consumes as
+// a custom datasource. Datasources plug in via WithDatasource.
 package server
 
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,17 +19,15 @@ import (
 const maxMinimumReleaseAge = 365 * 24 * time.Hour
 
 type Server struct {
-	repoDatasource    datasource.Datasource
-	apkDatasource     datasource.Datasource
+	datasources       map[string]datasource.Datasource
 	minimumReleaseAge time.Duration
 	now               func() time.Time
 	log               *slog.Logger
 }
 
-// New builds a Server. Datasources are attached via WithRepoDatasource /
-// WithAPKDatasource — a datasource is required for its endpoint to be
-// registered.
-func New(opts ...Option) *Server {
+// New builds a Server. At least one datasource must be attached via
+// WithDatasource; a Server with none is refused.
+func New(opts ...Option) (*Server, error) {
 	o := options{
 		minimumReleaseAge: defaultMinimumReleaseAge,
 		log:               slog.Default(),
@@ -39,13 +36,15 @@ func New(opts ...Option) *Server {
 	for _, fn := range opts {
 		fn(&o)
 	}
+	if len(o.datasources) == 0 {
+		return nil, errors.New("server.New: no datasources registered")
+	}
 	return &Server{
-		repoDatasource:    o.repoDatasource,
-		apkDatasource:     o.apkDatasource,
+		datasources:       o.datasources,
 		minimumReleaseAge: o.minimumReleaseAge,
 		now:               o.now,
 		log:               o.log,
-	}
+	}, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -55,10 +54,7 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		for name, ds := range map[string]datasource.Datasource{"repo": s.repoDatasource, "apk": s.apkDatasource} {
-			if ds == nil {
-				continue
-			}
+		for name, ds := range s.datasources {
 			if err := ds.Ready(r.Context()); err != nil {
 				s.log.WarnContext(r.Context(), "not ready", "datasource", name, "err", err)
 				writeAPIError(w, http.StatusServiceUnavailable, "The service isn't ready yet.")
@@ -68,25 +64,17 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Both /releases endpoints share the same body — parse the
-	// minimumReleaseAge window, look up, encode. The mux wiring
-	// differs only because repo paths can be multi-segment
-	// (charts/nginx, iamguarded-charts/postgresql) and http.ServeMux
-	// only allows the {...} wildcard as the trailing segment.
-	if s.repoDatasource != nil {
-		mux.HandleFunc("GET /v1/repo/{path...}", func(w http.ResponseWriter, r *http.Request) {
-			path := r.PathValue("path")
-			repo, ok := strings.CutSuffix(path, "/releases")
-			if !ok || repo == "" {
+	// Every datasource is served under /v1/<name>/{path...}. {path...}
+	// swallows slashes so multi-segment package names (charts/nginx)
+	// route through; per-source name validation runs in Releases().
+	for name, ds := range s.datasources {
+		mux.HandleFunc(fmt.Sprintf("GET /v1/%s/{path...}", name), func(w http.ResponseWriter, r *http.Request) {
+			pkg, ok := strings.CutSuffix(r.PathValue("path"), "/releases")
+			if !ok || pkg == "" {
 				writeAPIError(w, http.StatusNotFound, "Not found.")
 				return
 			}
-			s.serveReleases(w, r, "repo", s.repoDatasource, repo)
-		})
-	}
-	if s.apkDatasource != nil {
-		mux.HandleFunc("GET /v1/apk/{name}/releases", func(w http.ResponseWriter, r *http.Request) {
-			s.serveReleases(w, r, "apk", s.apkDatasource, r.PathValue("name"))
+			s.serveReleases(w, r, name, ds, pkg)
 		})
 	}
 	return mux
@@ -96,7 +84,7 @@ func (s *Server) Handler() http.Handler {
 // for every datasource: parse the minimumReleaseAge window, ask the
 // source for releases (which handles name validation itself), encode
 // the response.
-func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, ds datasource.Datasource, packageName string) {
+func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, name string, ds datasource.Datasource, packageName string) {
 	// ?minimumReleaseAge=<dur> overrides the server-wide
 	// --min-release-age default so a single deployment can serve
 	// multiple Renovate configurations that each want a different
@@ -111,7 +99,7 @@ func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, kind stri
 		minimumReleaseAge = d
 	}
 	arch := r.URL.Query().Get("arch")
-	s.log.InfoContext(r.Context(), "releases request", "kind", kind, "packageName", packageName, "minimumReleaseAge", minimumReleaseAge, "arch", arch, "remote", r.RemoteAddr, "ua", r.UserAgent())
+	s.log.InfoContext(r.Context(), "releases request", "datasource", name, "packageName", packageName, "minimumReleaseAge", minimumReleaseAge, "arch", arch, "remote", r.RemoteAddr, "ua", r.UserAgent())
 
 	opts := datasource.ReleasesOptions{
 		Before: cutoffFor(s.now(), minimumReleaseAge),
@@ -132,14 +120,14 @@ func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, kind stri
 			writeAPIError(w, http.StatusNotFound, "No package with that name.")
 			return
 		}
-		s.log.ErrorContext(r.Context(), "releases lookup failed", "kind", kind, "packageName", packageName, "err", err)
+		s.log.ErrorContext(r.Context(), "releases lookup failed", "datasource", name, "packageName", packageName, "err", err)
 		writeAPIError(w, http.StatusBadGateway, "The upstream lookup failed. Please try again in a moment.")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(datasource.Response{Releases: releases}); err != nil {
-		s.log.ErrorContext(r.Context(), "encoding response", "kind", kind, "packageName", packageName, "err", err)
+		s.log.ErrorContext(r.Context(), "encoding response", "datasource", name, "packageName", packageName, "err", err)
 	}
 }
 

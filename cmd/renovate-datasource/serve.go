@@ -121,7 +121,7 @@ func runServe(parent context.Context, opts *serveOptions) error {
 	}
 
 	if enableRepo {
-		serverOpts = append(serverOpts, server.WithRepoDatasource(datasource.NewRepoDatasource(cg, opts.concurrency)))
+		serverOpts = append(serverOpts, server.WithDatasource("repo", datasource.NewRepoDatasource(cg, opts.concurrency)))
 	}
 	if enableAPK {
 		// APK repository chain feeding the /v1/apk/{name}/releases index.
@@ -137,12 +137,16 @@ func runServe(parent context.Context, opts *serveOptions) error {
 		if err != nil {
 			log.Warn("initial apk index load failed; /v1/apk/{name}/releases will 404 until the next successful refresh", "err", err)
 		}
-		serverOpts = append(serverOpts, server.WithAPKDatasource(datasource.NewAPKDatasource(apkStore)))
+		serverOpts = append(serverOpts, server.WithDatasource("apk", datasource.NewAPKDatasource(apkStore)))
 	}
 
+	apiServer, err := server.New(serverOpts...)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:    net.JoinHostPort("", strconv.Itoa(opts.port)),
-		Handler: server.New(serverOpts...).Handler(),
+		Handler: apiServer.Handler(),
 		// Bound every part of a connection so a slow or stuck client can't
 		// pin a goroutine.
 		ReadHeaderTimeout: 5 * time.Second,
