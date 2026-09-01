@@ -25,8 +25,9 @@ minimumReleaseAge: ""
 # ["repo"] or ["apk"] to disable the other and skip its startup cost.
 datasources: []
 
-# -- Max concurrent ListTagHistory calls per request (--history-concurrency).
-historyConcurrency: 16
+# -- Cap on concurrent platform-API calls; also bounds per-request
+# history fan-out (--concurrency).
+concurrency: 16
 
 # -- Listen port for the HTTP service (--port).
 port: 8080

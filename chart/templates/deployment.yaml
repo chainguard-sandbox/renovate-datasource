@@ -34,8 +34,8 @@ spec:
             {{- with .Values.datasources }}
             - --datasource={{ join "," . }}
             {{- end }}
-            {{- with .Values.historyConcurrency }}
-            - --history-concurrency={{ . }}
+            {{- with .Values.concurrency }}
+            - --concurrency={{ . }}
             {{- end }}
           ports:
             - name: http
