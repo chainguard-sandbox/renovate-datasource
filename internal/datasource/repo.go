@@ -152,7 +152,9 @@ func applyMinimumReleaseAge(ctx context.Context, tags []chainguard.Tag, cutoff t
 				var best *chainguard.TagHistory
 				for j := range hist {
 					e := &hist[j]
-					if e.UpdateTimestamp.After(cutoff) {
+					// Drop zero-timestamp entries: we can't prove they
+					// sit outside the freshness window.
+					if e.UpdateTimestamp.IsZero() || e.UpdateTimestamp.After(cutoff) {
 						continue
 					}
 					if best == nil || e.UpdateTimestamp.After(best.UpdateTimestamp) {

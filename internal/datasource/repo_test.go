@@ -111,6 +111,33 @@ func TestApplyMinimumReleaseAge(t *testing.T) {
 			},
 		},
 		{
+			name: "history entries with zero UpdateTimestamp are ignored",
+			tags: []chainguard.Tag{
+				{ID: "latest", Name: "latest", LastUpdated: day(1), Digest: "sha256:new"},
+			},
+			history: map[string][]chainguard.TagHistory{
+				"latest": {
+					{UpdateTimestamp: time.Time{}, Digest: "sha256:zero-ts"},
+					{UpdateTimestamp: day(10), Digest: "sha256:rewind"},
+				},
+			},
+			want: []Release{
+				{Version: "latest", ReleaseTimestamp: day(10), Digest: "sha256:rewind"},
+			},
+		},
+		{
+			name: "history containing only zero-timestamp entries drops the tag",
+			tags: []chainguard.Tag{
+				{ID: "latest", Name: "latest", LastUpdated: day(1), Digest: "sha256:new"},
+			},
+			history: map[string][]chainguard.TagHistory{
+				"latest": {
+					{UpdateTimestamp: time.Time{}, Digest: "sha256:zero-ts"},
+				},
+			},
+			want: []Release{},
+		},
+		{
 			name: "history lookup error is propagated",
 			tags: []chainguard.Tag{
 				{ID: "latest", Name: "latest", LastUpdated: day(1), Digest: "sha256:new"},
