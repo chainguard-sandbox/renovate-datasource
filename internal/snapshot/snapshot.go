@@ -170,6 +170,12 @@ func Generate(ctx context.Context, outputDir string, opts ...Option) error {
 						skipped.Add(1)
 						return nil
 					}
+					var invalidName *datasource.InvalidPackageNameError
+					if errors.As(err, &invalidName) {
+						o.log.WarnContext(egCtx, "snapshot: skipping package (invalid name)", "datasource", name, "package", pkg, "err", invalidName.Message)
+						skipped.Add(1)
+						return nil
+					}
 					return fmt.Errorf("source %q releases for %q: %w", name, pkg, err)
 				}
 				if !maxAgeCutoff.IsZero() {

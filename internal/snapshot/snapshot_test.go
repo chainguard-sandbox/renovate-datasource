@@ -21,9 +21,10 @@ var silentLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 // fakeDatasource lets tests emit whatever (path, releases) pairs they
 // need without wiring up a real APKDatasource or RepoDatasource.
 type fakeDatasource struct {
-	packages map[string][]datasource.Release
-	pkgErr   error
-	relErr   error
+	packages     map[string][]datasource.Release
+	pkgErr       error
+	relErr       error
+	invalidNames map[string]string
 }
 
 func (f *fakeDatasource) PackageNames(_ context.Context) ([]string, error) {
@@ -40,6 +41,9 @@ func (f *fakeDatasource) PackageNames(_ context.Context) ([]string, error) {
 func (f *fakeDatasource) Releases(_ context.Context, name string, _ datasource.ReleasesOptions) ([]datasource.Release, error) {
 	if f.relErr != nil {
 		return nil, f.relErr
+	}
+	if msg, ok := f.invalidNames[name]; ok {
+		return nil, &datasource.InvalidPackageNameError{Message: msg}
 	}
 	r, ok := f.packages[name]
 	if !ok {
@@ -151,6 +155,32 @@ func TestGenerate_UnsafePathRejected(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected error for unsafe path")
+	}
+}
+
+// TestGenerate_InvalidPackageNameIsSkipped confirms that a datasource
+// which surfaces a name in PackageNames but rejects it in Releases with
+// InvalidPackageNameError (e.g. a poisoned APK index record) doesn't
+// abort the whole snapshot run.
+func TestGenerate_InvalidPackageNameIsSkipped(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "snap")
+	ds := &fakeDatasource{
+		packages: map[string][]datasource.Release{
+			"good":  {{Version: "1.0.0-r0"}},
+			"../bad": nil,
+		},
+		invalidNames: map[string]string{
+			"../bad": "The apk package name isn't well-formed.",
+		},
+	}
+	if err := Generate(context.Background(), out,
+		WithLogger(silentLog),
+		WithDatasource("apk", ds),
+	); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "apk", "good", "releases.json")); err != nil {
+		t.Errorf("expected good/releases.json: %v", err)
 	}
 }
 
