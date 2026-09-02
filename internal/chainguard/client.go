@@ -289,45 +289,42 @@ func (c *Client) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 // (a few hundred repos, a handful of subgroups). If throughput ever
 // matters, subgroup traversal can fan out via an errgroup.
 func (c *Client) ListAllRepos(ctx context.Context) ([]string, error) {
-	var out []string
-	if err := c.walkRepos(ctx, c.OrgUIDP, "", &out); err != nil {
+	out, err := walkRepos(ctx, c.OrgUIDP, c.listRepos, c.listSubgroups)
+	if err != nil {
 		return nil, err
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-func (c *Client) walkRepos(ctx context.Context, parentUIDP, prefix string, out *[]string) error {
-	repoResp, err := c.registry.Registry().ListRepos(ctx, &registry.RepoFilter{
+func (c *Client) listRepos(ctx context.Context, parentUIDP string) ([]string, error) {
+	resp, err := c.registry.Registry().ListRepos(ctx, &registry.RepoFilter{
 		Uidp: &common.UIDPFilter{ChildrenOf: parentUIDP},
 	})
 	if err != nil {
-		return fmt.Errorf("listing repos under %s: %w", parentUIDP, err)
+		return nil, err
 	}
-	for _, r := range repoResp.GetItems() {
-		name := r.GetName()
-		if prefix != "" {
-			name = prefix + "/" + name
-		}
-		*out = append(*out, name)
+	items := resp.GetItems()
+	names := make([]string, 0, len(items))
+	for _, r := range items {
+		names = append(names, r.GetName())
 	}
+	return names, nil
+}
 
-	groupResp, err := c.iam.Groups().List(ctx, &iam.GroupFilter{
+func (c *Client) listSubgroups(ctx context.Context, parentUIDP string) ([]groupChild, error) {
+	resp, err := c.iam.Groups().List(ctx, &iam.GroupFilter{
 		Uidp: &common.UIDPFilter{ChildrenOf: parentUIDP},
 	})
 	if err != nil {
-		return fmt.Errorf("listing subgroups under %s: %w", parentUIDP, err)
+		return nil, err
 	}
-	for _, g := range groupResp.GetItems() {
-		childPrefix := g.GetName()
-		if prefix != "" {
-			childPrefix = prefix + "/" + childPrefix
-		}
-		if err := c.walkRepos(ctx, g.GetId(), childPrefix, out); err != nil {
-			return err
-		}
+	items := resp.GetItems()
+	children := make([]groupChild, 0, len(items))
+	for _, g := range items {
+		children = append(children, groupChild{ID: g.GetId(), Name: g.GetName()})
 	}
-	return nil
+	return children, nil
 }
 
 // ListTagHistory returns historical iterations of the tag identified by tagID
