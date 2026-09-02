@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -121,6 +122,48 @@ func TestParseIndex_SkipsMalformedRecords(t *testing.T) {
 	}
 	if !out.releases["good"][0].Timestamp.IsZero() {
 		t.Errorf("malformed timestamp should leave Timestamp zero, got %v", out.releases["good"][0].Timestamp)
+	}
+}
+
+func TestParseIndex_ClampsOutOfRangeTimestamps(t *testing.T) {
+	// time.Time.MarshalJSON rejects years outside 0001..9999. A
+	// hostile mirror injecting a value near math.MaxInt64 would
+	// otherwise crash JSON encoding in the live handler or mid-
+	// snapshot. The record itself still lands so downstream logic
+	// isn't perturbed; only the timestamp is dropped.
+	body := strings.Join([]string{
+		"P:huge",
+		"V:1.0.0-r0",
+		"t:9223372036854775807",
+		"",
+		"P:negative-huge",
+		"V:1.0.0-r0",
+		"t:-9223372036854775808",
+		"",
+		"P:sane",
+		"V:1.0.0-r0",
+		"t:1700000000",
+		"",
+	}, "\n")
+
+	out := newIndexData()
+	if _, err := parseIndex(makeIndex(t, body), "x86_64", out); err != nil {
+		t.Fatalf("parseIndex: %v", err)
+	}
+	for _, name := range []string{"huge", "negative-huge"} {
+		if len(out.releases[name]) != 1 {
+			t.Fatalf("%s should still land: %+v", name, out.releases[name])
+		}
+		if !out.releases[name][0].Timestamp.IsZero() {
+			t.Errorf("%s.Timestamp = %v, want zero (out-of-range value clamped)", name, out.releases[name][0].Timestamp)
+		}
+	}
+	if got := out.releases["sane"][0].Timestamp; !got.Equal(time.Unix(1700000000, 0).UTC()) {
+		t.Errorf("sane.Timestamp = %v, want 1700000000", got)
+	}
+
+	if _, err := json.Marshal(out.releases); err != nil {
+		t.Errorf("marshalling parsed releases must not fail; got %v", err)
 	}
 }
 

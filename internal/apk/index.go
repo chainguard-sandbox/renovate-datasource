@@ -19,6 +19,14 @@ import (
 	"time"
 )
 
+// Bounds on the `t:` field: time.Time.MarshalJSON only accepts years
+// 0001..9999, so seconds outside this range would fail JSON encoding
+// in the live handler or during snapshot generation.
+const (
+	minJSONUnixSec int64 = -62135596800 // 0001-01-01T00:00:00Z
+	maxJSONUnixSec int64 = 253402300799 // 9999-12-31T23:59:59Z
+)
+
 // PackageVersion is one version of a package as it appears in an APKINDEX.
 type PackageVersion struct {
 	// Version is the raw apk version, e.g. "1.2.3-r0".
@@ -402,8 +410,10 @@ func parseAPKINDEX(r io.Reader, arch string, out *indexData) (int, error) {
 			// `t:0` (Unix epoch) is what apk-tools emits when no build
 			// timestamp is available. Treat it as absent so downstream
 			// filters can distinguish "no signal" from a real
-			// timestamp.
-			if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs != 0 {
+			// timestamp. Values outside the year range time.Time can
+			// serialise to JSON are also dropped so a poisoned mirror
+			// can't break encoding downstream.
+			if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs != 0 && secs >= minJSONUnixSec && secs <= maxJSONUnixSec {
 				cur.Timestamp = time.Unix(secs, 0).UTC()
 			}
 		case 'p':
