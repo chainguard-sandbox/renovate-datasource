@@ -14,6 +14,7 @@ func TestRepositoriesFromURLs(t *testing.T) {
 	tests := []struct {
 		name     string
 		urls     []string
+		env      string
 		wantErr  string
 		wantName []string
 		wantBase []string
@@ -60,10 +61,37 @@ func TestRepositoriesFromURLs(t *testing.T) {
 			urls:    []string{"https:///apk"},
 			wantErr: "missing host",
 		},
+		{
+			name:    "http URL with matching HTTP_AUTH is rejected",
+			urls:    []string{"http://mirror.example/apk"},
+			env:     "basic:mirror.example:alice:s3cret",
+			wantErr: "plaintext http",
+		},
+		{
+			name:     "http URL with non-matching HTTP_AUTH is fine",
+			urls:     []string{"http://mirror.example/apk"},
+			env:      "basic:other.example:alice:s3cret",
+			wantName: []string{"apk"},
+			wantBase: []string{"http://mirror.example/apk"},
+		},
+		{
+			name:     "http URL with no HTTP_AUTH is fine",
+			urls:     []string{"http://mirror.example/apk"},
+			wantName: []string{"apk"},
+			wantBase: []string{"http://mirror.example/apk"},
+		},
+		{
+			name:     "https URL with matching HTTP_AUTH is fine",
+			urls:     []string{"https://mirror.example/apk"},
+			env:      "basic:mirror.example:alice:s3cret",
+			wantName: []string{"apk"},
+			wantBase: []string{"https://mirror.example/apk"},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HTTP_AUTH", tc.env)
 			got, err := RepositoriesFromURLs(tc.urls)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {

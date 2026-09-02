@@ -104,6 +104,9 @@ func RepositoriesFromURLs(urls []string) ([]Repository, error) {
 		if last := path.Base(trimmed); last == "x86_64" || last == "aarch64" {
 			return nil, fmt.Errorf("apk-repository %q: pass the repo root, not the per-arch path (drop /%s)", raw, last)
 		}
+		if u.Scheme == "http" && httpAuthTargets(u.Host) {
+			return nil, fmt.Errorf("apk-repository %q: HTTP_AUTH is set for %s; refusing to send Basic credentials over plaintext http (use https)", raw, u.Host)
+		}
 		name := path.Base(trimmed)
 		if name == "" || name == "." || name == "/" {
 			name = u.Host
@@ -115,6 +118,18 @@ func RepositoriesFromURLs(urls []string) ([]Repository, error) {
 		})
 	}
 	return repos, nil
+}
+
+// httpAuthTargets reports whether HTTP_AUTH is currently set to a
+// well-formed Basic credential targeting host. Used to catch the
+// plaintext-transport + Basic-auth combination at config time.
+func httpAuthTargets(host string) bool {
+	env := os.Getenv("HTTP_AUTH")
+	if env == "" {
+		return false
+	}
+	parts := strings.SplitN(env, ":", 4)
+	return len(parts) == 4 && parts[0] == "basic" && parts[1] == host
 }
 
 // HTTPAuthFor returns an AuthFunc that reads the HTTP_AUTH env var on
