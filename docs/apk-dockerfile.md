@@ -30,7 +30,7 @@ To use this example:
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "customDatasources": {
     "chainguard-apk": {
-      "defaultRegistryUrlTemplate": "http://<datasource-host>/v1/apk/{{packageName}}/releases?minimumReleaseAge=168h",
+      "defaultRegistryUrlTemplate": "https://<datasource-host>/v1/apk/{{packageName}}/releases?minimumReleaseAge=168h",
       "format": "json"
     }
   },
