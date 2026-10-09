@@ -7,7 +7,7 @@ require (
 	chainguard.dev/sdk v0.1.257
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sync v0.23.0
+	golang.org/x/sync v0.24.0
 	google.golang.org/grpc v1.83.2
 )
 
