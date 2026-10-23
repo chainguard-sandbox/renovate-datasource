@@ -1,5 +1,10 @@
 # APK Datasource
 
+> Prefer Renovate's built-in
+> [`apk` datasource](https://docs.renovatebot.com/modules/datasource/apk/) for
+> new configurations. This one still works, but it is no longer the
+> recommended way to track APK package versions.
+
 Pulls the APKINDEX for the Chainguard repositories and serves the versions for
 each package over `/v1/apk/{packageName}/releases`, or writes them to
 `apk/{packageName}/releases.json` in `snapshot` mode.
