@@ -1,5 +1,10 @@
 # Updating APK Package Versions in Dockerfiles
 
+> Prefer Renovate's built-in
+> [`apk` datasource](https://docs.renovatebot.com/modules/datasource/apk/) for
+> new configurations. This example still works, but it is no longer the
+> recommended way to track APK package versions.
+
 Example Renovate configuration that updates pinned APK packages in
 Dockerfiles using the custom datasource.
 

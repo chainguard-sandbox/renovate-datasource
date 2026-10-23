@@ -21,8 +21,10 @@ image:
 # still overrides it.
 minimumReleaseAge: ""
 
-# -- Datasources to expose (--datasource). Empty means both. Set to
-# ["repo"] or ["apk"] to disable the other and skip its startup cost.
+# -- Datasources to expose (--datasource). Empty means both. Set to ["repo"]
+# to serve images and charts only, which is the recommended setting now that
+# Renovate has a built-in apk datasource. Serving apk also requires the
+# `apk.pull` role on the identity.
 datasources: []
 
 # -- Cap on concurrent platform-API calls; also bounds per-request
