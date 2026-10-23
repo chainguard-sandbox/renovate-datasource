@@ -98,23 +98,17 @@ func (s *Server) serveReleases(w http.ResponseWriter, r *http.Request, name stri
 		}
 		minimumReleaseAge = d
 	}
-	arch := r.URL.Query().Get("arch")
-	s.log.InfoContext(r.Context(), "releases request", "datasource", name, "packageName", packageName, "minimumReleaseAge", minimumReleaseAge, "arch", arch, "remote", r.RemoteAddr, "ua", r.UserAgent())
+	s.log.InfoContext(r.Context(), "releases request", "datasource", name, "packageName", packageName, "minimumReleaseAge", minimumReleaseAge, "remote", r.RemoteAddr, "ua", r.UserAgent())
 
 	opts := datasource.ReleasesOptions{
 		Before: cutoffFor(s.now(), minimumReleaseAge),
-		Arch:   arch,
 	}
 	releases, err := ds.Releases(r.Context(), packageName, opts)
 	if err != nil {
 		var invalidName *datasource.InvalidPackageNameError
-		var invalidArg *datasource.InvalidArgumentError
 		switch {
 		case errors.As(err, &invalidName):
 			writeAPIError(w, http.StatusBadRequest, invalidName.Message)
-			return
-		case errors.As(err, &invalidArg):
-			writeAPIError(w, http.StatusBadRequest, invalidArg.Message)
 			return
 		case errors.Is(err, datasource.ErrNotFound):
 			writeAPIError(w, http.StatusNotFound, "No package with that name.")

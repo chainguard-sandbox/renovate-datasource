@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
 	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 	"github.com/chainguard-sandbox/renovate-datasource/internal/datasource"
 )
@@ -19,7 +18,7 @@ import (
 var silentLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // fakeDatasource lets tests emit whatever (path, releases) pairs they
-// need without wiring up a real APKDatasource or RepoDatasource.
+// need without wiring up a real RepoDatasource.
 type fakeDatasource struct {
 	packages     map[string][]datasource.Release
 	pkgErr       error
@@ -62,7 +61,7 @@ func TestGenerate_NoDatasourcesErrors(t *testing.T) {
 
 func TestGenerate_RefusesExistingOutputDir(t *testing.T) {
 	err := Generate(context.Background(), t.TempDir(),
-		WithDatasource("apk", &fakeDatasource{}),
+		WithDatasource("repo", &fakeDatasource{}),
 	)
 	if err == nil {
 		t.Fatal("expected error refusing to reuse existing dir")
@@ -72,18 +71,18 @@ func TestGenerate_RefusesExistingOutputDir(t *testing.T) {
 func TestGenerate_WritesJSONForEachEntry(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "snap")
 	packages := map[string][]datasource.Release{
-		"curl":     {{Version: "8.21.0-r1", ReleaseTimestamp: time.Unix(1, 0).UTC()}},
-		"cmd:node": {{Version: "24.14.0-r0", ReleaseTimestamp: time.Unix(2, 0).UTC()}},
+		"python":       {{Version: "3.14", ReleaseTimestamp: time.Unix(1, 0).UTC()}},
+		"charts/nginx": {{Version: "22.1.0", ReleaseTimestamp: time.Unix(2, 0).UTC()}},
 	}
 	err := Generate(context.Background(), out,
 		WithLogger(silentLog),
-		WithDatasource("apk", &fakeDatasource{packages: packages}),
+		WithDatasource("repo", &fakeDatasource{packages: packages}),
 	)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	for name, want := range packages {
-		got := readResponse(t, filepath.Join(out, "apk", name, "releases.json"))
+		got := readResponse(t, filepath.Join(out, "repo", name, "releases.json"))
 		if len(got.Releases) != len(want) || got.Releases[0].Version != want[0].Version {
 			t.Errorf("%s: got %+v, want %+v", name, got, want)
 		}
@@ -94,8 +93,8 @@ func TestGenerate_MultipleDatasources(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "snap")
 	err := Generate(context.Background(), out,
 		WithLogger(silentLog),
-		WithDatasource("apk", &fakeDatasource{packages: map[string][]datasource.Release{
-			"curl": {{Version: "8.21.0-r1"}},
+		WithDatasource("other", &fakeDatasource{packages: map[string][]datasource.Release{
+			"thing": {{Version: "1.0.0"}},
 		}}),
 		WithDatasource("repo", &fakeDatasource{packages: map[string][]datasource.Release{
 			"python":       {{Version: "3.14"}},
@@ -106,7 +105,7 @@ func TestGenerate_MultipleDatasources(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(out, "apk", "curl", "releases.json"),
+		filepath.Join(out, "other", "thing", "releases.json"),
 		filepath.Join(out, "repo", "python", "releases.json"),
 		filepath.Join(out, "repo", "charts", "nginx", "releases.json"),
 	} {
@@ -126,9 +125,9 @@ func TestGenerate_MaxReleaseAgeAppliesToAllDatasources(t *testing.T) {
 		WithLogger(silentLog),
 		WithNow(func() time.Time { return now }),
 		WithMaxReleaseAge(180*24*time.Hour),
-		WithDatasource("apk", &fakeDatasource{packages: map[string][]datasource.Release{
-			"dormant":  {{Version: "1.0.0-r0", ReleaseTimestamp: oldTs}},
-			"active":   {{Version: "2.0.0-r0", ReleaseTimestamp: freshTs}},
+		WithDatasource("other", &fakeDatasource{packages: map[string][]datasource.Release{
+			"dormant": {{Version: "1.0.0", ReleaseTimestamp: oldTs}},
+			"active":  {{Version: "2.0.0", ReleaseTimestamp: freshTs}},
 		}}),
 		WithDatasource("repo", &fakeDatasource{packages: map[string][]datasource.Release{
 			"stale": {{Version: "1", ReleaseTimestamp: oldTs}},
@@ -139,9 +138,9 @@ func TestGenerate_MaxReleaseAgeAppliesToAllDatasources(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	mustExist(t, filepath.Join(out, "apk", "active", "releases.json"))
+	mustExist(t, filepath.Join(out, "other", "active", "releases.json"))
 	mustExist(t, filepath.Join(out, "repo", "fresh", "releases.json"))
-	mustNotExist(t, filepath.Join(out, "apk", "dormant"))
+	mustNotExist(t, filepath.Join(out, "other", "dormant"))
 	mustNotExist(t, filepath.Join(out, "repo", "stale"))
 }
 
@@ -149,7 +148,7 @@ func TestGenerate_UnsafePathRejected(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "snap")
 	err := Generate(context.Background(), out,
 		WithLogger(silentLog),
-		WithDatasource("apk", &fakeDatasource{packages: map[string][]datasource.Release{
+		WithDatasource("repo", &fakeDatasource{packages: map[string][]datasource.Release{
 			"../escape": {{Version: "1"}},
 		}}),
 	)
@@ -160,26 +159,26 @@ func TestGenerate_UnsafePathRejected(t *testing.T) {
 
 // TestGenerate_InvalidPackageNameIsSkipped confirms that a datasource
 // which surfaces a name in PackageNames but rejects it in Releases with
-// InvalidPackageNameError (e.g. a poisoned APK index record) doesn't
+// InvalidPackageNameError doesn't
 // abort the whole snapshot run.
 func TestGenerate_InvalidPackageNameIsSkipped(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "snap")
 	ds := &fakeDatasource{
 		packages: map[string][]datasource.Release{
-			"good":  {{Version: "1.0.0-r0"}},
+			"good":   {{Version: "1.0.0"}},
 			"../bad": nil,
 		},
 		invalidNames: map[string]string{
-			"../bad": "The apk package name isn't well-formed.",
+			"../bad": "The repo name isn't a valid OCI repository path.",
 		},
 	}
 	if err := Generate(context.Background(), out,
 		WithLogger(silentLog),
-		WithDatasource("apk", ds),
+		WithDatasource("repo", ds),
 	); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(out, "apk", "good", "releases.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "repo", "good", "releases.json")); err != nil {
 		t.Errorf("expected good/releases.json: %v", err)
 	}
 }
@@ -254,7 +253,7 @@ func TestGenerate_TargetNeverHalfPopulated(t *testing.T) {
 
 	if err := Generate(context.Background(), out,
 		WithLogger(silentLog),
-		WithDatasource("apk", probeDatasource),
+		WithDatasource("repo", probeDatasource),
 	); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -265,7 +264,7 @@ func TestGenerate_TargetNeverHalfPopulated(t *testing.T) {
 		t.Error("expected sibling tmp dir to exist mid-run")
 	}
 	// Post-condition: outputDir is populated, no tmp siblings remain.
-	if _, err := os.Stat(filepath.Join(out, "apk", "foo", "releases.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "repo", "foo", "releases.json")); err != nil {
 		t.Errorf("expected populated outputDir: %v", err)
 	}
 	entries, _ := os.ReadDir(parent)
@@ -292,31 +291,6 @@ func (o *observerDatasource) Releases(ctx context.Context, name string, opts dat
 	return o.inner.Releases(ctx, name, opts)
 }
 func (o *observerDatasource) Ready(ctx context.Context) error { return o.inner.Ready(ctx) }
-
-// TestAPKDatasource_SnapshotShape drives an APKDatasource through Generate
-// and confirms the on-disk shape matches the live handler's JSON.
-func TestAPKDatasource_SnapshotShape(t *testing.T) {
-	now := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
-	store := apk.NewIndexStore()
-	store.Replace(map[string][]apk.PackageVersion{
-		"curl": {{Version: "8.21.0-r1", Timestamp: now.AddDate(0, 0, -30), Arch: "x86_64"}},
-	}, []string{"x86_64"})
-	ds := datasource.NewAPKDatasource(store)
-
-	out := filepath.Join(t.TempDir(), "snap")
-	err := Generate(context.Background(), out,
-		WithLogger(silentLog),
-		WithNow(func() time.Time { return now }),
-		WithDatasource("apk", ds),
-	)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	got := readResponse(t, filepath.Join(out, "apk", "curl", "releases.json"))
-	if len(got.Releases) != 1 || got.Releases[0].Version != "8.21.0-r1" {
-		t.Errorf("got %+v, want single 8.21.0-r1 entry", got)
-	}
-}
 
 // TestRepoDatasource_SnapshotShape drives a RepoDatasource through Generate
 // with a fake backend and confirms writes land under repo/<path>/.

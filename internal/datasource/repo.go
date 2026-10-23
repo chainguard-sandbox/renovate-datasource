@@ -62,8 +62,6 @@ func (s *RepoDatasource) Ready(ctx context.Context) error { return s.Backend.Rea
 //   - opts.Before: when non-zero, tags newer than that instant are
 //     rewound to the newest historical digest at or before it (or
 //     dropped if none exists).
-//   - opts.Arch: ignored — images and helm charts aren't arch-scoped at the
-//     tag level.
 //
 // Malformed packageNames produce *InvalidPackageNameError; unknown repos
 // surface as ErrNotFound so callers can distinguish 404 from real

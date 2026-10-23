@@ -21,10 +21,6 @@ image:
 # still overrides it.
 minimumReleaseAge: ""
 
-# -- Datasources to expose (--datasource). Empty means both. Set to
-# ["repo"] or ["apk"] to disable the other and skip its startup cost.
-datasources: []
-
 # -- Cap on concurrent platform-API calls; also bounds per-request
 # history fan-out (--concurrency).
 concurrency: 16

@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/chainguard-sandbox/renovate-datasource/internal/apk"
 	"github.com/chainguard-sandbox/renovate-datasource/internal/chainguard"
 )
 
@@ -22,15 +21,15 @@ func main() {
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "renovate-datasource",
-		Short: "Renovate custom datasource for Chainguard images, apks, and helm charts",
+		Short: "Renovate custom datasource for Chainguard images and helm charts",
 		Long: `Serve or snapshot the /releases feeds Renovate consumes as a custom
 datasource. Two subcommands:
 
   serve     run an HTTP server that answers /releases requests live
   snapshot  write the same JSON payloads to a static folder tree
 
-Both talk to a single Chainguard org and support the same --datasource
-selection (repo, apk) and minimumReleaseAge semantics.
+Both talk to a single Chainguard org and share the same
+minimumReleaseAge semantics.
 
 Authentication:
   By default the service loads the chainctl token from disk
@@ -45,27 +44,6 @@ Authentication:
 	cmd.AddCommand(newServeCmd())
 	cmd.AddCommand(newSnapshotCmd())
 	return cmd
-}
-
-// parseDatasources validates the --datasource list and returns the
-// enable-repo / enable-apk booleans it implies. Empty and unknown values
-// are rejected so a typo doesn't silently disable both endpoints.
-func parseDatasources(values []string) (bool, bool, error) {
-	if len(values) == 0 {
-		return false, false, errors.New("--datasource must list at least one of: repo, apk")
-	}
-	var enableRepo, enableAPK bool
-	for _, v := range values {
-		switch v {
-		case "repo":
-			enableRepo = true
-		case "apk":
-			enableAPK = true
-		default:
-			return false, false, fmt.Errorf("unknown --datasource %q; supported: repo, apk", v)
-		}
-	}
-	return enableRepo, enableAPK, nil
 }
 
 // newLogger builds the JSON slog handler both subcommands use. level
@@ -120,14 +98,4 @@ func newChainguardClient(ctx context.Context, log *slog.Logger, org, identity, i
 	}
 	log.Info("resolved org", "org", org, "uidp", cg.OrgUIDP, "auth", authLbl)
 	return cg, nil
-}
-
-// resolveAPKRepositories picks between user-supplied mirror URLs and
-// the default Chainguard chain. cg may be nil only when
-// apkRepositoryURLs is non-empty.
-func resolveAPKRepositories(ctx context.Context, cg *chainguard.Client, apkRepositoryURLs []string) ([]apk.Repository, error) {
-	if len(apkRepositoryURLs) > 0 {
-		return apk.RepositoriesFromURLs(apkRepositoryURLs)
-	}
-	return apk.DefaultRepositories(cg.OrgName, cg.OrgUIDP, cg.APKTokenSource(ctx)), nil
 }

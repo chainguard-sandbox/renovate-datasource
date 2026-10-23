@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"chainguard.dev/sdk/auth"
 	delegate "chainguard.dev/go-grpc-kit/pkg/options"
 	common "chainguard.dev/sdk/proto/platform/common/v1"
 	iam "chainguard.dev/sdk/proto/platform/iam/v1"
@@ -21,10 +20,9 @@ import (
 )
 
 const (
-	apiURL      = "https://console-api.enforce.dev"
-	audience    = apiURL
-	issuer      = "https://issuer.enforce.dev"
-	apkAudience = "apk.cgr.dev"
+	apiURL   = "https://console-api.enforce.dev"
+	audience = apiURL
+	issuer   = "https://issuer.enforce.dev"
 )
 
 // ErrRepoNotFound is returned by ListTags when the requested repo doesn't
@@ -46,31 +44,7 @@ type Client struct {
 	conn     *grpc.ClientConn
 	mode     authMode
 
-	// baseTS is the raw OIDC token source, before any STS exchange.
-	// APKTokenSource wraps it in an apk.cgr.dev-audience exchange for
-	// the identity path.
-	baseTS    oauth2.TokenSource
-	identity  string // assumable identity UIDP for identity mode; "" for chainctl
 	tokenFile string // path to OIDC token file, if identity-mode + file-based
-}
-
-// APKTokenSource returns an oauth2.TokenSource that mints apk.cgr.dev-
-// audience tokens used to fetch private .apk artifacts from
-// https://apk.cgr.dev/<org>/<arch>/<name>-<version>.apk.
-//
-// In identity mode this is an STS exchange against the configured
-// assumable identity. In chainctl mode it defers to the SDK's chainctl
-// token machinery (auth.NewChainctlTokenSource), which loads from the
-// chainctl token cache and re-issues as needed. Callers should surface
-// any error returned by Token() rather than silently degrading.
-func (c *Client) APKTokenSource(ctx context.Context) oauth2.TokenSource {
-	switch c.mode {
-	case authIdentity:
-		xchg := sts.New(issuer, apkAudience, sts.WithIdentity(c.identity))
-		return sts.NewContextTokenSource(ctx, c.baseTS, xchg)
-	default:
-		return auth.NewChainctlTokenSource(ctx, auth.WithAudience(apkAudience))
-	}
 }
 
 // New creates a Client scoped to a single Chainguard org. orgName is resolved
@@ -92,14 +66,9 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 	}
 
 	// Per-mode auth setup: build the platform-audience token source
-	// attached to the gRPC connection. In identity mode we also hold on
-	// to the un-exchanged base so APKTokenSource can trade it for an
-	// apk.cgr.dev-audience token; chainctl mode goes through the SDK's
-	// chainctl helper directly instead.
+	// attached to the gRPC connection.
 	var (
 		ts        oauth2.TokenSource
-		baseTS    oauth2.TokenSource
-		identity  string
 		tokenFile string
 	)
 	switch o.mode {
@@ -118,7 +87,7 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		baseTS, tokenFile, identity = base, file, o.identity
+		tokenFile = file
 		xchg := sts.New(issuer, audience, sts.WithIdentity(o.identity))
 		ts = oauth2.ReuseTokenSource(nil, sts.NewContextTokenSource(ctx, base, xchg))
 	}
@@ -157,8 +126,6 @@ func New(ctx context.Context, orgName string, opts ...Option) (*Client, error) {
 		registry:  regc,
 		conn:      conn,
 		mode:      o.mode,
-		baseTS:    baseTS,
-		identity:  identity,
 		tokenFile: tokenFile,
 	}, nil
 }

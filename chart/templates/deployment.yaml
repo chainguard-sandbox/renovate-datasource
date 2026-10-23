@@ -31,9 +31,6 @@ spec:
             {{- with .Values.minimumReleaseAge }}
             - --min-release-age={{ . }}
             {{- end }}
-            {{- with .Values.datasources }}
-            - --datasource={{ join "," . }}
-            {{- end }}
             {{- with .Values.concurrency }}
             - --concurrency={{ . }}
             {{- end }}
